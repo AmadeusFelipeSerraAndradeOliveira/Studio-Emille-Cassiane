@@ -137,6 +137,8 @@ input::placeholder, textarea::placeholder { color: #aaa19b; }
 .contact-section { display: grid; grid-template-columns: .8fr 1.2fr; gap: 60px; padding-top: 105px; padding-bottom: 105px; }
 .contact-section > div:first-child > p:not(.eyebrow) { max-width: 310px; margin-top: 20px; color: var(--muted); font-size: 13px; line-height: 1.85; }
 .contact-details { display: grid; grid-template-columns: 1fr 1fr; gap: 30px 36px; padding-top: 20px; }
+.contact-actions { display: flex; flex-wrap: wrap; gap: 12px; grid-column: 1 / -1; margin-top: 2px; }
+.contact-actions .button { justify-content: center; }
 .contact-details > div { padding-top: 12px; border-top: 1px solid var(--line); }
 .contact-details span { color: var(--rose-deep); font-size: 9px; font-weight: 700; letter-spacing: .16em; }
 .contact-details p, .contact-details a { margin: 6px 0 0; color: #625b55; font-size: 12px; text-decoration: none; }
@@ -303,6 +305,8 @@ input::placeholder, textarea::placeholder { color: #aaa19b; }
   .booking-form .field-row { grid-template-columns: 1fr; gap: 13px; }
   .contact-section { grid-template-columns: 1fr; gap: 20px; padding-top: 72px; padding-bottom: 72px; }
   .contact-details { gap: 20px; padding-top: 5px; }
+  .contact-actions { flex-direction: column; }
+  .contact-actions .button { width: 100%; }
   .site-footer { flex-wrap: wrap; justify-content: center; padding: 22px 18px; text-align: center; }
   .site-footer .brand { flex-basis: 100%; justify-content: center; }
   .site-footer p { flex-basis: 100%; }
@@ -343,3 +347,5 @@ input::placeholder, textarea::placeholder { color: #aaa19b; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; }
 }
+
+
