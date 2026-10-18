@@ -189,13 +189,16 @@ input::placeholder, textarea::placeholder { color: #aaa19b; }
 .booking-time strong { display: block; font-size: 11px; }
 .status-pill { display: inline-block; padding: 5px 8px; background: #eee7e0; color: #605750; font-size: 9px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
 .status-pending { background: #f8edd4; color: #765c25; }
-.status-confirmed { background: #e4f0e9; color: #3e6c51; }
-.status-refused, .status-cancelled { background: #f4e6e4; color: #92514d; }
+.status-confirmed, .status-completed { background: #e4f0e9; color: #3e6c51; }
+.status-refused, .status-cancelled, .status-no_show { background: #f4e6e4; color: #92514d; }
 .status-expired { background: #e9e5e0; color: #6d655e; }
 .booking-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .mini-button { min-height: 32px; padding: 6px 9px; border: 1px solid #d9d0c9; background: transparent; color: var(--ink); cursor: pointer; font-size: 9px; }
 .mini-button:hover { border-color: var(--rose-deep); color: var(--rose-deep); }
 .mini-button:disabled { opacity: .5; }
+.mini-button-danger { border-color: #c99999; color: #8a3434; }
+.mini-button-success { border-color: #8da894; color: #365a42; }
+.stat-card small { display: block; margin-top: 6px; color: var(--muted); font-size: 10px; }
 .pagination { display: flex; justify-content: space-between; align-items: center; margin-top: 18px; color: var(--muted); font-size: 10px; }
 .view-intro { max-width: 700px; margin-bottom: 24px; color: var(--muted); font-size: 12px; }
 .admin-service-list { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
