@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { CONFIG } from "../assets/config.js";
 import {
   addCalendarDays, bookingIsLogicallyExpired, buildPeriodRange, currentPrice, eligibleForRetention,
-  epochDay, generateTimeOptions, getSlotLockIds, makeCsv, normalizePhone, whatsappUrl, zonedDateTimeToUtc,
+  epochDay, generateTimeOptions, getSlotLockIds, makeCsv, normalizePhone, summarizeFinance, whatsappUrl, zonedDateTimeToUtc,
 } from "../assets/domain.js";
 
 const timezone = "America/Araguaina";
@@ -14,6 +14,8 @@ test("configuração aponta para o app Firebase e UID informados", () => {
   assert.deepEqual(CONFIG.authorizedAdminUids, ["4zC1SQs7YRQ0FfkGARdImqu2w7z1"]);
   assert.equal(CONFIG.whatsappE164, "5563984007189");
   assert.equal(CONFIG.address, "Bertaville, Rua Zeca de Moraes, QD 32, LT 09");
+  assert.ok(CONFIG.mapsUrl.startsWith("https://www.google.com/maps/"));
+  assert.ok(CONFIG.mapsUrl.includes("-10.2939906,-48.3173194"));
 });
 
 test("converte horário local do studio para instante UTC", () => {
@@ -90,3 +92,14 @@ test("CSV mantém acentos e escapa aspas e quebras de linha", () => {
   assert.ok(csv.includes('"“quero, sim” linha 2"'));
 });
 
+
+
+test("resumo financeiro considera apenas valores recebidos e separa saldo em aberto e faltas", () => {
+  const summary = summarizeFinance([
+    { status: "completed", priceCents: 10000, receivedCents: 7500 },
+    { status: "completed", priceCents: 5000, receivedCents: 0 },
+    { status: "no_show", priceCents: 9000, receivedCents: 0 },
+    { status: "confirmed", priceCents: 12000, receivedCents: 0 },
+  ], [{ amountCents: 2000 }, { amountCents: 500 }], [{ receivedCents: 7000 }, { receivedCents: 1000 }]);
+  assert.deepEqual(summary, { receivedCents: 8000, receivableCents: 7500, expenseCents: 2500, balanceCents: 5500, completedCount: 2, noShowCount: 1, expenseCount: 2 });
+});
