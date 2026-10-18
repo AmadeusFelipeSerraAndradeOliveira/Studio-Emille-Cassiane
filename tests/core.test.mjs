@@ -12,6 +12,8 @@ test("configuração aponta para o app Firebase e UID informados", () => {
   assert.equal(CONFIG.firebase.projectId, "studio-cassiana-emille");
   assert.equal(CONFIG.firebase.appId, "1:90344996694:web:75400f251b9397b7dc20f7");
   assert.deepEqual(CONFIG.authorizedAdminUids, ["4zC1SQs7YRQ0FfkGARdImqu2w7z1"]);
+  assert.equal(CONFIG.whatsappE164, "5563984007189");
+  assert.equal(CONFIG.address, "Bertaville, Rua Zeca de Moraes, QD 32, LT 09");
 });
 
 test("converte horário local do studio para instante UTC", () => {
@@ -87,3 +89,4 @@ test("CSV mantém acentos e escapa aspas e quebras de linha", () => {
   assert.ok(csv.includes('"João"'));
   assert.ok(csv.includes('"“quero, sim” linha 2"'));
 });
+
