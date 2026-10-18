@@ -5,12 +5,15 @@ export const CONFIG = Object.freeze({
   instagramUrl: "",
   timezone: "America/Araguaina",
   recaptchaV3SiteKey: "", // Opcional: configure App Check depois de registrar o site.
-  authorizedAdminUids: ["PREENCHER_UID_ADMIN_1", "PREENCHER_UID_ADMIN_2"],
+  authorizedAdminUids: ["4zC1SQs7YRQ0FfkGARdImqu2w7z1"],
   firebase: Object.freeze({
-    apiKey: "PREENCHER_NO_FIREBASE_CONSOLE",
-    authDomain: "PREENCHER_NO_FIREBASE_CONSOLE",
-    projectId: "PREENCHER_NO_FIREBASE_CONSOLE",
-    appId: "PREENCHER_NO_FIREBASE_CONSOLE",
+    apiKey: "AIzaSyDLaxf_tYSc4t7ZzE_VSSbKyQyUqS3rSWQ",
+    authDomain: "studio-cassiana-emille.firebaseapp.com",
+    projectId: "studio-cassiana-emille",
+    storageBucket: "studio-cassiana-emille.firebasestorage.app",
+    messagingSenderId: "90344996694",
+    appId: "1:90344996694:web:75400f251b9397b7dc20f7",
+    measurementId: "G-TV1M17LW29",
   }),
 });
 

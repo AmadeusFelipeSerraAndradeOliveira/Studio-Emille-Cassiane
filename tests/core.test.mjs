@@ -1,11 +1,18 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { CONFIG } from "../assets/config.js";
 import {
   addCalendarDays, bookingIsLogicallyExpired, buildPeriodRange, currentPrice, eligibleForRetention,
   epochDay, generateTimeOptions, getSlotLockIds, makeCsv, normalizePhone, whatsappUrl, zonedDateTimeToUtc,
 } from "../assets/domain.js";
 
 const timezone = "America/Araguaina";
+
+test("configuração aponta para o app Firebase e UID informados", () => {
+  assert.equal(CONFIG.firebase.projectId, "studio-cassiana-emille");
+  assert.equal(CONFIG.firebase.appId, "1:90344996694:web:75400f251b9397b7dc20f7");
+  assert.deepEqual(CONFIG.authorizedAdminUids, ["4zC1SQs7YRQ0FfkGARdImqu2w7z1"]);
+});
 
 test("converte horário local do studio para instante UTC", () => {
   const value = zonedDateTimeToUtc("2026-10-20", "10:30", timezone);

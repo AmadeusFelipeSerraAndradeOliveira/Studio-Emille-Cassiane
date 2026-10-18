@@ -8,14 +8,13 @@ import {
 import { getSlotLockIds, zonedDateTimeToUtc } from "../assets/domain.js";
 
 const projectId = "demo-studio-emille";
-const adminUid = "test-admin-uid";
+const adminUid = "4zC1SQs7YRQ0FfkGARdImqu2w7z1";
 let testEnv;
 let serviceData;
 let scheduleData;
 
 before(async () => {
   let rules = await readFile(new URL("../firestore.rules", import.meta.url), "utf8");
-  rules = rules.replaceAll("__UID_ADMIN_1__", adminUid).replaceAll("__UID_ADMIN_2__", "test-admin-uid-2");
   testEnv = await initializeTestEnvironment({
     projectId,
     firestore: { host: "127.0.0.1", port: 8080, rules },
@@ -82,6 +81,8 @@ async function submitBooking(database, options = {}) {
 test("visitor lê serviços ativos, mas não lê nem lista reservas", async () => {
   const visitor = testEnv.unauthenticatedContext().firestore();
   await assertSucceeds(getDocs(query(collection(visitor, "services"), where("active", "==", true))));
+  await assertSucceeds(getDoc(doc(visitor, "settings", "public")));
+  await assertFails(getDoc(doc(visitor, "settings", "admin")));
   await assertFails(getDoc(doc(visitor, "bookings", "guessable")));
   await assertFails(getDocs(collection(visitor, "bookings")));
 });
@@ -90,15 +91,13 @@ test("criação atômica cria um pedido pendente e bloqueia as fatias sobreposta
   const visitor = testEnv.unauthenticatedContext().firestore();
   const slot = futureSlot(4, "10:00");
   const first = await submitBooking(visitor, { slot });
-  const visible = await assertFails(getDoc(first.bookingRef));
-  assert.equal(visible, undefined);
-  const sameStart = await assert.rejects(() => submitBooking(visitor, { slot }), /slot occupied|permission/i);
-  assert.ok(sameStart);
+  await assertFails(getDoc(first.bookingRef));
+  await assert.rejects(() => submitBooking(visitor, { slot }), /slot occupied|permission/i);
 });
 
 test("regras negam preço adulterado e acesso de usuário comum a status", async () => {
   const visitor = testEnv.unauthenticatedContext().firestore();
-  await assert.rejects(() => submitBooking(visitor, { priceCents: 1 }), /permission/i);
+  await assert.rejects(() => submitBooking(visitor, { slot: futureSlot(5, "16:00"), priceCents: 1 }), /permission/i);
   const booking = await submitBooking(visitor, { slot: futureSlot(6, "11:00") });
   const ordinaryUser = testEnv.authenticatedContext("authenticated-but-not-admin").firestore();
   await assertFails(getDoc(doc(ordinaryUser, "bookings", booking.bookingRef.id)));
@@ -145,16 +144,18 @@ test("somente UID autorizado consegue aprovar o pedido junto com seus bloqueios"
   const visitor = testEnv.unauthenticatedContext().firestore();
   const booking = await submitBooking(visitor, { slot: futureSlot(9, "10:30") });
   const admin = testEnv.authenticatedContext(adminUid).firestore();
-  await assertSucceeds(getDoc(booking.bookingRef));
+  const adminBookingRef = doc(admin, "bookings", booking.bookingRef.id);
+  const adminLockRefs = booking.lockIds.map((id) => doc(admin, "slotLocks", id));
+  await assertSucceeds(getDoc(adminBookingRef));
   await runTransaction(admin, async (transaction) => {
-    const reservation = await transaction.get(booking.bookingRef);
-    const locks = await Promise.all(booking.lockRefs.map((ref) => transaction.get(ref)));
-    transaction.update(booking.bookingRef, { status: "confirmed", updatedAt: serverTimestamp(), decisionAt: serverTimestamp() });
-    booking.lockRefs.forEach((ref, index) => {
+    const reservation = await transaction.get(adminBookingRef);
+    const locks = await Promise.all(adminLockRefs.map((ref) => transaction.get(ref)));
+    transaction.update(adminBookingRef, { status: "confirmed", updatedAt: serverTimestamp(), decisionAt: serverTimestamp() });
+    adminLockRefs.forEach((ref, index) => {
       if (locks[index].exists()) transaction.update(ref, { status: "confirmed", expiresAt: null });
     });
     assert.equal(reservation.data().status, "pending");
   });
-  const confirmed = await getDoc(booking.bookingRef);
+  const confirmed = await getDoc(adminBookingRef);
   assert.equal(confirmed.data().status, "confirmed");
 });

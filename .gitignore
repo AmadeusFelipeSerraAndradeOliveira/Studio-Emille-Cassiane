@@ -1,5 +1,6 @@
 .firebaserc
 node_modules/
+.test-runtime/
 .firebase/
 firebase-debug.log
 firestore-debug.log

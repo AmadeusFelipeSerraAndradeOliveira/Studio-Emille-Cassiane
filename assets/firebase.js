@@ -14,7 +14,7 @@ export let db = null;
 export let sdk = null;
 
 if (firebaseReady) {
-  const version = "12.19.0";
+  const version = "13.0.0";
   const [appApi, authApi, firestoreApi] = await Promise.all([
     import(`https://www.gstatic.com/firebasejs/${version}/firebase-app.js`),
     import(`https://www.gstatic.com/firebasejs/${version}/firebase-auth.js`),

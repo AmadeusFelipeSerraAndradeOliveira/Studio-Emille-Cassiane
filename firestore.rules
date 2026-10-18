@@ -3,7 +3,7 @@ service cloud.firestore {
   match /databases/{database}/documents {
     // Troque os marcadores pelos UIDs exatos dos administradores autorizados.
     function isAdmin() {
-      return request.auth != null && request.auth.uid in ['__UID_ADMIN_1__', '__UID_ADMIN_2__'];
+      return request.auth != null && request.auth.uid == '4zC1SQs7YRQ0FfkGARdImqu2w7z1';
     }
 
     function publicSettingsPath() {
@@ -22,16 +22,16 @@ service cloud.firestore {
       return /databases/$(database)/documents/slotLocks/$(lockId);
     }
 
-    function isPromo(service) {
-      return service.get('promoPriceCents', null) is int &&
-        service.get('promoStartsAt', null) is timestamp &&
-        service.get('promoEndsAt', null) is timestamp &&
-        service.promoStartsAt <= request.time &&
-        request.time < service.promoEndsAt;
+    function isPromo(serviceData) {
+      return serviceData.get('promoPriceCents', null) is int &&
+        serviceData.get('promoStartsAt', null) is timestamp &&
+        serviceData.get('promoEndsAt', null) is timestamp &&
+        serviceData.promoStartsAt <= request.time &&
+        request.time < serviceData.promoEndsAt;
     }
 
-    function currentPrice(service) {
-      return isPromo(service) ? service.promoPriceCents : service.basePriceCents;
+    function currentPrice(serviceData) {
+      return isPromo(serviceData) ? serviceData.promoPriceCents : serviceData.basePriceCents;
     }
 
     function validService(data) {
@@ -92,21 +92,21 @@ service cloud.firestore {
         data.lastCleanupCount is int && data.lastCleanupCount >= 0 && data.lastCleanupCount <= 100;
     }
 
-    function validSchedule(data, service) {
+    function validSchedule(data, serviceData) {
       let settings = get(publicSettingsPath()).data;
       let localSlot = data.slotAt - duration.value(3, 'h'); // Studio em America/Araguaina (UTC-03:00).
       let localDayNumber = math.floor(localSlot.date().toMillis() / 86400000);
       let mondayFirstDay = localSlot.dayOfWeek() == 1 ? 7 : localSlot.dayOfWeek() - 1;
       let overlapsBreak = settings.breakStartMinute >= 0 &&
         data.slotMinute < settings.breakEndMinute &&
-        data.slotMinute + service.durationMinutes > settings.breakStartMinute;
+        data.slotMinute + serviceData.durationMinutes > settings.breakStartMinute;
       return settings.enabled == true &&
         localSlot.hours() * 60 + localSlot.minutes() == data.slotMinute &&
         data.slotMinute % 30 == 0 &&
         mondayFirstDay in settings.workingDays &&
         !(localDayNumber in settings.holidays) &&
         data.slotMinute >= settings.openMinute &&
-        data.slotMinute + service.durationMinutes <= settings.closeMinute &&
+        data.slotMinute + serviceData.durationMinutes <= settings.closeMinute &&
         !overlapsBreak &&
         data.slotAt >= request.time + duration.value(settings.minimumLeadMinutes, 'm') &&
         data.slotAt <= request.time + duration.value(settings.daysAhead, 'd') &&
@@ -158,7 +158,7 @@ service cloud.firestore {
 
     function validBookingCreate(bookingId, data) {
       let path = servicePath(data.serviceId);
-      let service = get(path).data;
+      let serviceData = get(path).data;
       let firstLock = lockPath(data.slotLockIds[0]);
       return data.keys().hasAll([
           'name', 'phone', 'serviceId', 'serviceName', 'durationMinutes', 'priceCents',
@@ -170,9 +170,9 @@ service cloud.firestore {
         ]) &&
         data.name is string && data.name.size() >= 2 && data.name.size() <= 80 &&
         data.phone is string && data.phone.matches('^[0-9]{10,15}$') &&
-        data.serviceId is string && exists(path) && service.active == true &&
-        data.serviceName == service.name && data.durationMinutes == service.durationMinutes &&
-        data.priceCents is int && data.priceCents == currentPrice(service) &&
+        data.serviceId is string && exists(path) && serviceData.active == true &&
+        data.serviceName == serviceData.name && data.durationMinutes == serviceData.durationMinutes &&
+        data.priceCents is int && data.priceCents == currentPrice(serviceData) &&
         data.slotAt is timestamp && data.slotMinute is int && data.slotMinute >= 0 && data.slotMinute < 1440 &&
         data.slotLockIds is list && data.slotLockIds.size() >= 1 && data.slotLockIds.size() <= 4 &&
         data.notes is string && data.notes.size() <= 500 && data.status == 'pending' &&
@@ -180,7 +180,7 @@ service cloud.firestore {
         data.expiresAt is timestamp &&
         data.expiresAt >= request.time + duration.value(1790, 's') &&
         data.expiresAt <= request.time + duration.value(1810, 's') &&
-        validSchedule(data, service) &&
+        validSchedule(data, serviceData) &&
         hasAllPendingLocks(data, bookingId) &&
         getAfter(firstLock).data.bookingId == bookingId;
     }
