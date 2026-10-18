@@ -73,6 +73,8 @@ test("retenção preserva pedidos pendentes, confirmados e futuros", () => {
   const cutoff = new Date("2026-10-01T00:00:00Z");
   const oldSlot = new Date("2026-08-01T00:00:00Z");
   assert.equal(eligibleForRetention({ status: "cancelled", slotAt: oldSlot }, cutoff, new Date("2026-10-20T00:00:00Z")), true);
+  assert.equal(eligibleForRetention({ status: 'completed', slotAt: oldSlot }, cutoff, new Date('2026-10-20T00:00:00Z')), true);
+  assert.equal(eligibleForRetention({ status: 'no_show', slotAt: oldSlot }, cutoff, new Date('2026-10-20T00:00:00Z')), true);
   for (const status of ["pending", "confirmed"]) {
     assert.equal(eligibleForRetention({ status, slotAt: oldSlot }, cutoff, new Date("2026-10-20T00:00:00Z")), false);
   }
