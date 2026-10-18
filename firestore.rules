@@ -1,0 +1,264 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Troque os marcadores pelos UIDs exatos dos administradores autorizados.
+    function isAdmin() {
+      return request.auth != null && request.auth.uid in ['__UID_ADMIN_1__', '__UID_ADMIN_2__'];
+    }
+
+    function publicSettingsPath() {
+      return /databases/$(database)/documents/settings/public;
+    }
+
+    function servicePath(serviceId) {
+      return /databases/$(database)/documents/services/$(serviceId);
+    }
+
+    function bookingPath(bookingId) {
+      return /databases/$(database)/documents/bookings/$(bookingId);
+    }
+
+    function lockPath(lockId) {
+      return /databases/$(database)/documents/slotLocks/$(lockId);
+    }
+
+    function isPromo(service) {
+      return service.get('promoPriceCents', null) is int &&
+        service.get('promoStartsAt', null) is timestamp &&
+        service.get('promoEndsAt', null) is timestamp &&
+        service.promoStartsAt <= request.time &&
+        request.time < service.promoEndsAt;
+    }
+
+    function currentPrice(service) {
+      return isPromo(service) ? service.promoPriceCents : service.basePriceCents;
+    }
+
+    function validService(data) {
+      return data.keys().hasAll([
+          'name', 'description', 'durationMinutes', 'basePriceCents', 'promoPriceCents',
+          'promoStartsAt', 'promoEndsAt', 'active', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'name', 'description', 'durationMinutes', 'basePriceCents', 'promoPriceCents',
+          'promoStartsAt', 'promoEndsAt', 'active', 'createdAt', 'updatedAt'
+        ]) &&
+        data.name is string && data.name.size() >= 2 && data.name.size() <= 70 &&
+        data.description is string && data.description.size() <= 350 &&
+        data.durationMinutes in [30, 60, 90, 120] &&
+        data.basePriceCents is int && data.basePriceCents > 0 && data.basePriceCents <= 500000 &&
+        ((data.get('promoPriceCents', null) == null &&
+          data.get('promoStartsAt', null) == null && data.get('promoEndsAt', null) == null) ||
+          (data.get('promoPriceCents', null) is int &&
+           data.promoPriceCents > 0 && data.promoPriceCents < data.basePriceCents &&
+           data.get('promoStartsAt', null) is timestamp && data.get('promoEndsAt', null) is timestamp &&
+           data.promoStartsAt < data.promoEndsAt)) &&
+        data.active is bool && data.createdAt is timestamp && data.updatedAt is timestamp;
+    }
+
+    function validSettings(data) {
+      return data.keys().hasAll([
+          'enabled', 'openMinute', 'closeMinute', 'breakStartMinute', 'breakEndMinute',
+          'workingDays', 'holidays', 'minimumLeadMinutes', 'daysAhead'
+        ]) &&
+        data.keys().hasOnly([
+          'enabled', 'openMinute', 'closeMinute', 'breakStartMinute', 'breakEndMinute',
+          'workingDays', 'holidays', 'minimumLeadMinutes', 'daysAhead'
+        ]) &&
+        data.enabled is bool &&
+        data.openMinute is int && data.openMinute >= 0 && data.openMinute < 1440 &&
+        data.closeMinute is int && data.closeMinute > data.openMinute && data.closeMinute <= 1440 &&
+        data.breakStartMinute is int && data.breakStartMinute >= -1 && data.breakStartMinute < 1440 &&
+        data.breakEndMinute is int && data.breakEndMinute >= -1 && data.breakEndMinute <= 1440 &&
+        ((data.breakStartMinute == -1 && data.breakEndMinute == -1) ||
+          (data.breakStartMinute >= data.openMinute && data.breakEndMinute > data.breakStartMinute && data.breakEndMinute <= data.closeMinute)) &&
+        data.workingDays is list && data.workingDays.size() <= 7 &&
+        data.holidays is list && data.holidays.size() <= 120 &&
+        data.minimumLeadMinutes is int && data.minimumLeadMinutes >= 0 && data.minimumLeadMinutes <= 10080 &&
+        data.daysAhead is int && data.daysAhead >= 1 && data.daysAhead <= 120;
+    }
+
+    function validMaintenance(data) {
+      return data.keys().hasAll([
+          'retentionDays', 'retentionEnabled', 'lastExportAt', 'lastExportIds', 'lastCleanupAt', 'lastCleanupCount'
+        ]) &&
+        data.keys().hasOnly([
+          'retentionDays', 'retentionEnabled', 'lastExportAt', 'lastExportIds', 'lastCleanupAt', 'lastCleanupCount'
+        ]) &&
+        data.retentionDays == 60 && data.retentionEnabled is bool &&
+        (data.lastExportAt is timestamp || data.lastExportAt == null) &&
+        data.lastExportIds is list && data.lastExportIds.size() <= 100 &&
+        (data.lastCleanupAt is timestamp || data.lastCleanupAt == null) &&
+        data.lastCleanupCount is int && data.lastCleanupCount >= 0 && data.lastCleanupCount <= 100;
+    }
+
+    function validSchedule(data, service) {
+      let settings = get(publicSettingsPath()).data;
+      let localSlot = data.slotAt - duration.value(3, 'h'); // Studio em America/Araguaina (UTC-03:00).
+      let localDayNumber = math.floor(localSlot.date().toMillis() / 86400000);
+      let mondayFirstDay = localSlot.dayOfWeek() == 1 ? 7 : localSlot.dayOfWeek() - 1;
+      let overlapsBreak = settings.breakStartMinute >= 0 &&
+        data.slotMinute < settings.breakEndMinute &&
+        data.slotMinute + service.durationMinutes > settings.breakStartMinute;
+      return settings.enabled == true &&
+        localSlot.hours() * 60 + localSlot.minutes() == data.slotMinute &&
+        data.slotMinute % 30 == 0 &&
+        mondayFirstDay in settings.workingDays &&
+        !(localDayNumber in settings.holidays) &&
+        data.slotMinute >= settings.openMinute &&
+        data.slotMinute + service.durationMinutes <= settings.closeMinute &&
+        !overlapsBreak &&
+        data.slotAt >= request.time + duration.value(settings.minimumLeadMinutes, 'm') &&
+        data.slotAt <= request.time + duration.value(settings.daysAhead, 'd') &&
+        data.slotAt.seconds() % 60 == 0 && data.slotAt.nanos() == 0;
+    }
+
+    function lockIdIsExpected(data, index) {
+      return int(data.slotLockIds[index]) == data.slotAt.toMillis() + index * 1800000;
+    }
+
+    function lockMatchesAfter(data, bookingId, index) {
+      let lockId = data.slotLockIds[index];
+      let path = lockPath(lockId);
+      return existsAfter(path) &&
+        getAfter(path).data.bookingId == bookingId &&
+        getAfter(path).data.status == 'pending' &&
+        getAfter(path).data.slotAt.toMillis() == int(lockId) &&
+        getAfter(path).data.expiresAt == data.expiresAt;
+    }
+
+    function hasAllPendingLocks(data, bookingId) {
+      return (data.durationMinutes == 30 && data.slotLockIds.size() == 1 && lockIdIsExpected(data, 0) && lockMatchesAfter(data, bookingId, 0)) ||
+        (data.durationMinutes == 60 && data.slotLockIds.size() == 2 && lockIdIsExpected(data, 0) && lockIdIsExpected(data, 1) && lockMatchesAfter(data, bookingId, 0) && lockMatchesAfter(data, bookingId, 1)) ||
+        (data.durationMinutes == 90 && data.slotLockIds.size() == 3 && lockIdIsExpected(data, 0) && lockIdIsExpected(data, 1) && lockIdIsExpected(data, 2) && lockMatchesAfter(data, bookingId, 0) && lockMatchesAfter(data, bookingId, 1) && lockMatchesAfter(data, bookingId, 2)) ||
+        (data.durationMinutes == 120 && data.slotLockIds.size() == 4 && lockIdIsExpected(data, 0) && lockIdIsExpected(data, 1) && lockIdIsExpected(data, 2) && lockIdIsExpected(data, 3) && lockMatchesAfter(data, bookingId, 0) && lockMatchesAfter(data, bookingId, 1) && lockMatchesAfter(data, bookingId, 2) && lockMatchesAfter(data, bookingId, 3));
+    }
+
+    function lockHasConfirmedStatus(data, bookingId, index) {
+      let path = lockPath(data.slotLockIds[index]);
+      return existsAfter(path) && getAfter(path).data.bookingId == bookingId &&
+        getAfter(path).data.status == 'confirmed' && getAfter(path).data.expiresAt == null;
+    }
+
+    function lockReleasedAfter(data, bookingId, index) {
+      let path = lockPath(data.slotLockIds[index]);
+      return !existsAfter(path) || getAfter(path).data.bookingId != bookingId;
+    }
+
+    function allLocksHaveStatus(data, bookingId, expectedStatus) {
+      return (data.slotLockIds.size() == 1 &&
+          (expectedStatus == 'confirmed' ? lockHasConfirmedStatus(data, bookingId, 0) : lockReleasedAfter(data, bookingId, 0))) ||
+        (data.slotLockIds.size() == 2 &&
+          (expectedStatus == 'confirmed' ? lockHasConfirmedStatus(data, bookingId, 0) && lockHasConfirmedStatus(data, bookingId, 1) : lockReleasedAfter(data, bookingId, 0) && lockReleasedAfter(data, bookingId, 1))) ||
+        (data.slotLockIds.size() == 3 &&
+          (expectedStatus == 'confirmed' ? lockHasConfirmedStatus(data, bookingId, 0) && lockHasConfirmedStatus(data, bookingId, 1) && lockHasConfirmedStatus(data, bookingId, 2) : lockReleasedAfter(data, bookingId, 0) && lockReleasedAfter(data, bookingId, 1) && lockReleasedAfter(data, bookingId, 2))) ||
+        (data.slotLockIds.size() == 4 &&
+          (expectedStatus == 'confirmed' ? lockHasConfirmedStatus(data, bookingId, 0) && lockHasConfirmedStatus(data, bookingId, 1) && lockHasConfirmedStatus(data, bookingId, 2) && lockHasConfirmedStatus(data, bookingId, 3) : lockReleasedAfter(data, bookingId, 0) && lockReleasedAfter(data, bookingId, 1) && lockReleasedAfter(data, bookingId, 2) && lockReleasedAfter(data, bookingId, 3)));
+    }
+
+    function validBookingCreate(bookingId, data) {
+      let path = servicePath(data.serviceId);
+      let service = get(path).data;
+      let firstLock = lockPath(data.slotLockIds[0]);
+      return data.keys().hasAll([
+          'name', 'phone', 'serviceId', 'serviceName', 'durationMinutes', 'priceCents',
+          'slotAt', 'slotMinute', 'slotLockIds', 'notes', 'status', 'createdAt', 'updatedAt', 'expiresAt'
+        ]) &&
+        data.keys().hasOnly([
+          'name', 'phone', 'serviceId', 'serviceName', 'durationMinutes', 'priceCents',
+          'slotAt', 'slotMinute', 'slotLockIds', 'notes', 'status', 'createdAt', 'updatedAt', 'expiresAt'
+        ]) &&
+        data.name is string && data.name.size() >= 2 && data.name.size() <= 80 &&
+        data.phone is string && data.phone.matches('^[0-9]{10,15}$') &&
+        data.serviceId is string && exists(path) && service.active == true &&
+        data.serviceName == service.name && data.durationMinutes == service.durationMinutes &&
+        data.priceCents is int && data.priceCents == currentPrice(service) &&
+        data.slotAt is timestamp && data.slotMinute is int && data.slotMinute >= 0 && data.slotMinute < 1440 &&
+        data.slotLockIds is list && data.slotLockIds.size() >= 1 && data.slotLockIds.size() <= 4 &&
+        data.notes is string && data.notes.size() <= 500 && data.status == 'pending' &&
+        data.createdAt == request.time && data.updatedAt == request.time &&
+        data.expiresAt is timestamp &&
+        data.expiresAt >= request.time + duration.value(1790, 's') &&
+        data.expiresAt <= request.time + duration.value(1810, 's') &&
+        validSchedule(data, service) &&
+        hasAllPendingLocks(data, bookingId) &&
+        getAfter(firstLock).data.bookingId == bookingId;
+    }
+
+    function validPublicLockWrite(lockId) {
+      let bookingId = request.resource.data.bookingId;
+      let path = bookingPath(bookingId);
+      let canTakeSlot = !exists(lockPath(lockId)) ||
+        (resource.data.status == 'pending' && resource.data.expiresAt is timestamp && resource.data.expiresAt <= request.time);
+      return request.resource.data.keys().hasAll(['bookingId', 'status', 'slotAt', 'expiresAt']) &&
+        request.resource.data.keys().hasOnly(['bookingId', 'status', 'slotAt', 'expiresAt']) &&
+        request.resource.data.status == 'pending' &&
+        request.resource.data.slotAt is timestamp && request.resource.data.expiresAt is timestamp &&
+        int(lockId) == request.resource.data.slotAt.toMillis() && canTakeSlot &&
+        existsAfter(path) && getAfter(path).data.status == 'pending' &&
+        getAfter(path).data.slotLockIds.hasAny([lockId]) &&
+        getAfter(path).data.expiresAt == request.resource.data.expiresAt;
+    }
+
+    function adminBookingTransition(bookingId) {
+      let next = request.resource.data.status;
+      let previous = resource.data.status;
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt', 'decisionAt']) &&
+        request.resource.data.updatedAt == request.time && request.resource.data.decisionAt == request.time &&
+        ((previous == 'pending' && next == 'confirmed' && allLocksHaveStatus(request.resource.data, bookingId, 'confirmed')) ||
+         (previous == 'pending' && next == 'refused' && allLocksHaveStatus(request.resource.data, bookingId, 'released')) ||
+         (previous == 'pending' && next == 'expired' && resource.data.expiresAt <= request.time && allLocksHaveStatus(request.resource.data, bookingId, 'released')) ||
+         (previous == 'confirmed' && next == 'cancelled' && allLocksHaveStatus(request.resource.data, bookingId, 'released')));
+    }
+
+    match /services/{serviceId} {
+      allow get, list: if isAdmin() || resource.data.active == true;
+      allow create: if isAdmin() && validService(request.resource.data) && request.resource.data.createdAt == request.time && request.resource.data.updatedAt == request.time;
+      allow update: if isAdmin() && validService(request.resource.data) && request.resource.data.createdAt == resource.data.createdAt && request.resource.data.updatedAt == request.time;
+      allow delete: if isAdmin();
+    }
+
+    match /settings/public {
+      allow get: if true;
+      allow list: if false;
+      allow create: if isAdmin() && validSettings(request.resource.data);
+      allow update: if isAdmin() && validSettings(request.resource.data);
+      allow delete: if false;
+    }
+
+    match /settings/admin {
+      allow get: if isAdmin();
+      allow list: if false;
+      allow create: if isAdmin() && validMaintenance(request.resource.data);
+      allow update: if isAdmin() && validMaintenance(request.resource.data);
+      allow delete: if false;
+    }
+
+    match /slotLocks/{lockId} {
+      // Disponibilidade usa get() por chave; listagem de todos os bloqueios é negada.
+      allow get: if true;
+      allow list: if false;
+      allow create: if validPublicLockWrite(lockId);
+      allow update: if (isAdmin() && existsAfter(bookingPath(request.resource.data.bookingId)) &&
+          getAfter(bookingPath(request.resource.data.bookingId)).data.status == 'confirmed' &&
+          getAfter(bookingPath(request.resource.data.bookingId)).data.slotLockIds.hasAny([lockId]) &&
+          request.resource.data.bookingId == resource.data.bookingId &&
+          request.resource.data.status == 'confirmed' && request.resource.data.expiresAt == null &&
+          request.resource.data.slotAt == resource.data.slotAt) || validPublicLockWrite(lockId);
+      allow delete: if isAdmin() && existsAfter(bookingPath(resource.data.bookingId)) &&
+        getAfter(bookingPath(resource.data.bookingId)).data.status in ['refused', 'expired', 'cancelled'] &&
+        getAfter(bookingPath(resource.data.bookingId)).data.slotLockIds.hasAny([lockId]);
+    }
+
+    match /bookings/{bookingId} {
+      allow get, list: if isAdmin();
+      allow create: if validBookingCreate(bookingId, request.resource.data);
+      allow update: if isAdmin() && adminBookingTransition(bookingId);
+      // A exclusão administrativa só pode remover pedidos encerrados com mais de 60 dias.
+      allow delete: if isAdmin() && resource.data.status in ['refused', 'expired', 'cancelled'] &&
+        resource.data.slotAt < request.time - duration.value(60, 'd');
+    }
+
+    // Nenhuma regra genérica concede leitura ou escrita em caminhos futuros.
+  }
+}

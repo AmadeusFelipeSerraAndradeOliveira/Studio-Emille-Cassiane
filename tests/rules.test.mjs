@@ -1,0 +1,160 @@
+import test, { before, after } from "node:test";
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { initializeTestEnvironment, assertFails, assertSucceeds } from "@firebase/rules-unit-testing";
+import {
+  collection, doc, getDoc, getDocs, query, runTransaction, serverTimestamp, setDoc, Timestamp, updateDoc, where,
+} from "firebase/firestore";
+import { getSlotLockIds, zonedDateTimeToUtc } from "../assets/domain.js";
+
+const projectId = "demo-studio-emille";
+const adminUid = "test-admin-uid";
+let testEnv;
+let serviceData;
+let scheduleData;
+
+before(async () => {
+  let rules = await readFile(new URL("../firestore.rules", import.meta.url), "utf8");
+  rules = rules.replaceAll("__UID_ADMIN_1__", adminUid).replaceAll("__UID_ADMIN_2__", "test-admin-uid-2");
+  testEnv = await initializeTestEnvironment({
+    projectId,
+    firestore: { host: "127.0.0.1", port: 8080, rules },
+  });
+  serviceData = {
+    name: "Serviço de teste", description: "Serviço para validar regras.", durationMinutes: 60,
+    basePriceCents: 10000, promoPriceCents: null, promoStartsAt: null, promoEndsAt: null,
+    active: true, createdAt: Timestamp.now(), updatedAt: Timestamp.now(),
+  };
+  scheduleData = {
+    enabled: true, openMinute: 9 * 60, closeMinute: 18 * 60,
+    breakStartMinute: 12 * 60, breakEndMinute: 13 * 60,
+    workingDays: [1, 2, 3, 4, 5, 6, 7], holidays: [],
+    minimumLeadMinutes: 0, daysAhead: 120,
+  };
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    const database = context.firestore();
+    await setDoc(doc(database, "services", "service-test"), serviceData);
+    await setDoc(doc(database, "settings", "public"), scheduleData);
+  });
+});
+
+after(async () => testEnv?.cleanup());
+
+function futureSlot(daysAhead = 4, time = "10:00") {
+  const date = new Date();
+  date.setUTCHours(12, 0, 0, 0);
+  date.setUTCDate(date.getUTCDate() + daysAhead);
+  const localDate = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Araguaina", year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
+  const slotAt = zonedDateTimeToUtc(localDate, time, "America/Araguaina");
+  return { localDate, slotAt, minute: Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5)) };
+}
+
+async function submitBooking(database, options = {}) {
+  const { localDate, slotAt, minute } = options.slot || futureSlot();
+  const durationMinutes = options.durationMinutes || 60;
+  const lockIds = getSlotLockIds(slotAt, durationMinutes);
+  const bookingRef = doc(collection(database, "bookings"));
+  const lockRefs = lockIds.map((id) => doc(database, "slotLocks", id));
+  const expiresAt = Timestamp.fromDate(new Date(Date.now() + 30 * 60_000));
+  const booking = {
+    name: "Ana Teste", phone: "11999998888", serviceId: "service-test", serviceName: "Serviço de teste",
+    durationMinutes, priceCents: options.priceCents ?? 10000,
+    slotAt: Timestamp.fromDate(slotAt), slotMinute: minute, slotLockIds: lockIds,
+    notes: "", status: "pending", createdAt: serverTimestamp(), updatedAt: serverTimestamp(), expiresAt,
+  };
+  await runTransaction(database, async (transaction) => {
+    const locks = await Promise.all(lockRefs.map((ref) => transaction.get(ref)));
+    const now = Date.now();
+    if (locks.some((item) => item.exists() && !(item.data().status === "pending" && item.data().expiresAt?.toDate().getTime() <= now))) {
+      throw new Error("slot occupied");
+    }
+    transaction.set(bookingRef, booking);
+    lockRefs.forEach((ref, index) => transaction.set(ref, {
+      bookingId: bookingRef.id,
+      status: "pending",
+      slotAt: Timestamp.fromMillis(Number(lockIds[index])),
+      expiresAt,
+    }));
+  });
+  return { bookingRef, lockRefs, lockIds };
+}
+
+test("visitor lê serviços ativos, mas não lê nem lista reservas", async () => {
+  const visitor = testEnv.unauthenticatedContext().firestore();
+  await assertSucceeds(getDocs(query(collection(visitor, "services"), where("active", "==", true))));
+  await assertFails(getDoc(doc(visitor, "bookings", "guessable")));
+  await assertFails(getDocs(collection(visitor, "bookings")));
+});
+
+test("criação atômica cria um pedido pendente e bloqueia as fatias sobrepostas", async () => {
+  const visitor = testEnv.unauthenticatedContext().firestore();
+  const slot = futureSlot(4, "10:00");
+  const first = await submitBooking(visitor, { slot });
+  const visible = await assertFails(getDoc(first.bookingRef));
+  assert.equal(visible, undefined);
+  const sameStart = await assert.rejects(() => submitBooking(visitor, { slot }), /slot occupied|permission/i);
+  assert.ok(sameStart);
+});
+
+test("regras negam preço adulterado e acesso de usuário comum a status", async () => {
+  const visitor = testEnv.unauthenticatedContext().firestore();
+  await assert.rejects(() => submitBooking(visitor, { priceCents: 1 }), /permission/i);
+  const booking = await submitBooking(visitor, { slot: futureSlot(6, "11:00") });
+  const ordinaryUser = testEnv.authenticatedContext("authenticated-but-not-admin").firestore();
+  await assertFails(getDoc(doc(ordinaryUser, "bookings", booking.bookingRef.id)));
+  await assertFails(updateDoc(doc(ordinaryUser, "bookings", booking.bookingRef.id), { status: "confirmed" }));
+});
+
+test("reservas concorrentes para o mesmo horário têm um único vencedor", async () => {
+  const firstClient = testEnv.unauthenticatedContext().firestore();
+  const secondClient = testEnv.unauthenticatedContext().firestore();
+  const slot = futureSlot(7, "14:00");
+  const results = await Promise.allSettled([
+    submitBooking(firstClient, { slot }),
+    submitBooking(secondClient, { slot }),
+  ]);
+  assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
+});
+
+test("pedido expirado libera as chaves do horário sem exclusão automática", async () => {
+  const slot = futureSlot(8, "15:00");
+  const lockIds = getSlotLockIds(slot.slotAt, 60);
+  await testEnv.withSecurityRulesDisabled(async (context) => {
+    const database = context.firestore();
+    const expiresAt = Timestamp.fromDate(new Date(Date.now() - 1000));
+    const oldRef = doc(database, "bookings", "old-expired-booking");
+    await setDoc(oldRef, {
+      name: "Registro expirado", phone: "11999998888", serviceId: "service-test", serviceName: "Serviço de teste",
+      durationMinutes: 60, priceCents: 10000, slotAt: Timestamp.fromDate(slot.slotAt), slotMinute: slot.minute,
+      slotLockIds: lockIds, notes: "", status: "pending", createdAt: Timestamp.now(), updatedAt: Timestamp.now(), expiresAt,
+    });
+    for (let index = 0; index < lockIds.length; index += 1) {
+      await setDoc(doc(database, "slotLocks", lockIds[index]), {
+        bookingId: oldRef.id, status: "pending", slotAt: Timestamp.fromMillis(Number(lockIds[index])), expiresAt,
+      });
+    }
+  });
+  const visitor = testEnv.unauthenticatedContext().firestore();
+  const next = await submitBooking(visitor, { slot });
+  assert.ok(next.bookingRef.id);
+  const admin = testEnv.authenticatedContext(adminUid).firestore();
+  assert.equal((await getDoc(doc(admin, "bookings", "old-expired-booking"))).data().status, "pending");
+});
+
+test("somente UID autorizado consegue aprovar o pedido junto com seus bloqueios", async () => {
+  const visitor = testEnv.unauthenticatedContext().firestore();
+  const booking = await submitBooking(visitor, { slot: futureSlot(9, "10:30") });
+  const admin = testEnv.authenticatedContext(adminUid).firestore();
+  await assertSucceeds(getDoc(booking.bookingRef));
+  await runTransaction(admin, async (transaction) => {
+    const reservation = await transaction.get(booking.bookingRef);
+    const locks = await Promise.all(booking.lockRefs.map((ref) => transaction.get(ref)));
+    transaction.update(booking.bookingRef, { status: "confirmed", updatedAt: serverTimestamp(), decisionAt: serverTimestamp() });
+    booking.lockRefs.forEach((ref, index) => {
+      if (locks[index].exists()) transaction.update(ref, { status: "confirmed", expiresAt: null });
+    });
+    assert.equal(reservation.data().status, "pending");
+  });
+  const confirmed = await getDoc(booking.bookingRef);
+  assert.equal(confirmed.data().status, "confirmed");
+});
