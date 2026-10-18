@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f8f4ef">
+    <title>Administração — Studio Emille Cassiane</title>
+    <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+    <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="assets/styles.css">
+  </head>
+  <body class="admin-page">
+    <a class="skip-link" href="#admin-main">Pular para o conteúdo</a>
+    <header class="admin-header"><a class="brand" href="index.html"><span class="brand-mark" aria-hidden="true">EC</span><span class="brand-copy"><strong data-studio-name>Studio Emille Cassiane</strong><small>PAINEL DO STUDIO</small></span></a><a class="text-link" href="index.html">← Voltar ao site</a></header>
+    <main id="admin-main" class="admin-main">
+      <section id="setup-notice" class="setup-notice" hidden></section>
+      <section id="login-panel" class="login-panel">
+        <p class="eyebrow">ACESSO RESTRITO</p><h1>Bem-vinda,<br><em>por aqui.</em></h1><p>Entre com a conta administrativa cadastrada no Firebase Authentication.</p>
+        <form id="login-form"><label>E-mail<input name="email" type="email" autocomplete="username" required></label><label>Senha<input name="password" type="password" autocomplete="current-password" required></label><button class="button button-dark button-wide" type="submit">Entrar no painel <span aria-hidden="true">↗</span></button><p id="login-status" class="form-status" role="status"></p></form>
+        <p class="login-hint">A criação de contas é feita no Firebase Console. Não há senha padrão no aplicativo.</p>
+      </section>
+      <section id="dashboard" class="dashboard" hidden>
+        <div class="dashboard-top"><div><p class="eyebrow">VISÃO GERAL</p><h1>Agenda do <em>studio.</em></h1></div><div class="dashboard-user"><span id="admin-email"></span><button id="logout-button" class="button button-outline" type="button">Sair</button></div></div>
+        <div id="dashboard-alert" class="dashboard-alert" role="status" hidden></div>
+        <nav class="admin-tabs" aria-label="Seções administrativas"><button class="is-active" data-view="agenda" type="button">Agenda</button><button data-view="services" type="button">Serviços</button><button data-view="schedule" type="button">Expediente</button><button data-view="data" type="button">Relatórios e dados</button></nav>
+
+        <section class="admin-view" id="view-agenda">
+          <div class="view-heading"><div><p class="eyebrow">PEDIDOS E HORÁRIOS</p><h2>Agenda</h2></div><div class="view-controls"><select id="range-mode" aria-label="Período da agenda"><option value="day">Dia</option><option value="week">Semana</option><option value="month">Mês</option></select><input id="range-date" type="date" aria-label="Data da agenda"><button id="refresh-agenda" class="button button-outline" type="button">Atualizar</button></div></div>
+          <div id="stat-cards" class="stat-grid"></div>
+          <div class="filter-bar"><label class="search-field">Buscar nome ou telefone<input id="search-bookings" type="search" placeholder="Digite para filtrar…"></label><label>Status<select id="status-filter"><option value="all">Todos</option><option value="pending">Pendentes</option><option value="confirmed">Confirmados</option><option value="refused">Recusados</option><option value="expired">Expirados</option><option value="cancelled">Cancelados</option></select></label></div>
+          <div id="booking-list" class="booking-list" aria-live="polite"></div><div class="pagination"><button id="load-more" class="button button-outline" type="button" hidden>Carregar mais</button><span id="agenda-count"></span></div>
+        </section>
+
+        <section class="admin-view" id="view-services" hidden>
+          <div class="view-heading"><div><p class="eyebrow">CATÁLOGO PÚBLICO</p><h2>Serviços</h2></div><button id="new-service" class="button button-dark" type="button">Adicionar serviço <span aria-hidden="true">＋</span></button></div>
+          <p class="view-intro">Somente serviços ativos aparecem no site. O valor da reserva é registrado no momento do pedido.</p>
+          <div id="admin-service-list" class="admin-service-list"></div>
+          <dialog id="service-dialog" class="app-dialog"><form id="service-form" method="dialog"><div class="dialog-heading"><div><p class="eyebrow">CATÁLOGO</p><h3 id="service-dialog-title">Novo serviço</h3></div><button class="dialog-close" value="cancel" aria-label="Fechar">×</button></div><input name="id" type="hidden"><label>Nome *<input name="name" maxlength="70" required></label><label>Descrição *<textarea name="description" rows="3" maxlength="350" required></textarea></label><div class="field-row"><label>Duração (min) *<select name="durationMinutes" required><option value="30">30 min</option><option value="60">60 min</option><option value="90">90 min</option><option value="120">120 min</option></select></label><label>Preço normal (R$) *<input name="basePrice" type="number" min="0.01" step="0.01" required></label></div><div class="field-row"><label>Preço promocional (R$)<input name="promoPrice" type="number" min="0.01" step="0.01"></label><label>Oferta começa em<input name="promoStart" type="date"></label></div><label>Oferta termina em<input name="promoEnd" type="date"></label><label class="consent-check"><input name="active" type="checkbox" checked><span>Serviço ativo e visível no site</span></label><div class="dialog-actions"><button class="button button-outline" value="cancel">Cancelar</button><button id="save-service" class="button button-dark" value="save">Salvar serviço</button></div><p class="form-status" id="service-status" role="status"></p></form></dialog>
+        </section>
+
+        <section class="admin-view" id="view-schedule" hidden>
+          <div class="view-heading"><div><p class="eyebrow">DISPONIBILIDADE</p><h2>Expediente</h2></div></div>
+          <p class="view-intro">Os dados abaixo controlam as opções de horário exibidas no formulário público. A grade trabalha em blocos de 30 minutos.</p>
+          <form id="schedule-form" class="settings-form"><div class="field-row"><label>Abre às *<input name="openTime" type="time" required></label><label>Fecha às *<input name="closeTime" type="time" required></label></div><div class="field-row"><label>Intervalo começa às<input name="breakStart" type="time"></label><label>Intervalo termina às<input name="breakEnd" type="time"></label></div><fieldset><legend>Dias de atendimento</legend><div class="weekday-options"><label><input type="checkbox" name="weekday" value="1"> Seg</label><label><input type="checkbox" name="weekday" value="2"> Ter</label><label><input type="checkbox" name="weekday" value="3"> Qua</label><label><input type="checkbox" name="weekday" value="4"> Qui</label><label><input type="checkbox" name="weekday" value="5"> Sex</label><label><input type="checkbox" name="weekday" value="6"> Sáb</label><label><input type="checkbox" name="weekday" value="7"> Dom</label></div></fieldset><label>Feriados e folgas (uma data por linha)<textarea name="holidays" rows="4" placeholder="2026-12-25"></textarea></label><div class="field-row"><label>Antecedência mínima (horas)<input name="minimumLeadHours" type="number" min="0" max="168" step="1" required></label><label>Máximo de dias para agendar<input name="daysAhead" type="number" min="1" max="120" step="1" required></label></div><button class="button button-dark" type="submit">Salvar expediente</button><p id="schedule-status" class="form-status" role="status"></p></form>
+          <div class="schedule-note"><strong>Fuso horário do projeto</strong><p>America/Araguaina (UTC−03:00). A alteração do fuso também exige ajustar a constante indicada nas regras Firestore.</p></div>
+        </section>
+
+        <section class="admin-view" id="view-data" hidden>
+          <div class="view-heading"><div><p class="eyebrow">CONTROLE E MANUTENÇÃO</p><h2>Relatórios e dados</h2></div></div>
+          <div class="data-card"><div><h3>Exportação da agenda</h3><p>Exporte os resultados carregados na agenda em CSV, compatível com Excel. Para imprimir ou salvar em PDF, use a impressão do navegador.</p></div><div class="button-row"><button id="export-current" class="button button-outline" type="button">Exportar CSV da agenda</button><button id="print-current" class="button button-outline" type="button">Imprimir / salvar PDF</button></div></div>
+          <div class="data-card"><div><h3>Retenção de reservas antigas</h3><p id="retention-summary">Política desativada. O padrão é 60 dias para pedidos encerrados.</p><p class="data-warning">Pedidos pendentes, confirmados e futuros nunca entram na limpeza. Exporte antes e confirme cada lote. A limpeza só roda quando um administrador abre este painel.</p></div><button id="retention-toggle" class="button button-outline" type="button">Ativar política de 60 dias</button></div>
+          <div id="retention-batch" class="retention-batch" hidden><h3>Lote elegível para limpeza</h3><p id="retention-batch-copy"></p><div class="button-row"><button id="export-old" class="button button-outline" type="button">Exportar lote CSV</button><button id="delete-old" class="button button-danger" type="button" disabled>Excluir lote exportado</button></div><p id="retention-status" class="form-status" role="status"></p></div>
+          <div class="data-card"><div><h3>Consumo do Firebase</h3><p>As leituras da agenda são limitadas e carregadas por período. Confira as cotas e o uso real no Console Firebase; os limites e preços podem mudar.</p></div><a class="button button-outline" href="https://console.firebase.google.com/" target="_blank" rel="noopener">Abrir Firebase Console ↗</a></div>
+          <div class="privacy-reminder"><strong>Privacidade</strong><p>Solicite apenas os dados necessários para responder ao pedido. Defina uma política de privacidade adequada à operação do studio e às obrigações legais locais.</p><a href="privacy.html" target="_blank" rel="noopener">Ver aviso do site</a></div>
+        </section>
+      </section>
+    </main>
+    <footer class="site-footer admin-footer"><a class="text-link" href="privacy.html">Aviso de privacidade</a><a class="text-link" href="index.html">Voltar ao site</a></footer>
+    <script type="module" src="assets/admin.js"></script>
+  </body>
+</html>
