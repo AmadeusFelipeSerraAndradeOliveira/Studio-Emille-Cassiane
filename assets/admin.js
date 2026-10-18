@@ -460,21 +460,22 @@ async function deleteService(service) {
 }
 
 async function createSampleServices() {
-  if (!window.confirm("Criar três serviços e preços apenas ilustrativos? Revise ou exclua os exemplos antes de ativar o site público.")) return;
+  if (!window.confirm("Criar os quatro serviços com valores e durações iniciais de referência? Eles ficarão ativos e visíveis no site. Você poderá editar valores, duração e descrição no painel.")) return;
   const now = sdk.serverTimestamp();
   const examples = [
-    { name: "Manicure — exemplo", description: "Serviço demonstrativo. Substitua por uma descrição real.", durationMinutes: 60, basePriceCents: 5500, promoPriceCents: null, promoStartsAt: null, promoEndsAt: null, active: false, createdAt: now, updatedAt: now },
-    { name: "Design de sobrancelhas — exemplo", description: "Serviço demonstrativo. Substitua por uma descrição real.", durationMinutes: 30, basePriceCents: 4000, promoPriceCents: null, promoStartsAt: null, promoEndsAt: null, active: false, createdAt: now, updatedAt: now },
-    { name: "Escova — exemplo", description: "Serviço demonstrativo. Substitua por uma descrição real.", durationMinutes: 60, basePriceCents: 8000, promoPriceCents: null, promoStartsAt: null, promoEndsAt: null, active: false, createdAt: now, updatedAt: now },
+    { name: "Atendimento Social", description: "Valor e duração iniciais de referência. Edite as informações no painel conforme necessário.", durationMinutes: 60, basePriceCents: 12000, promoPriceCents: null, promoStartsAt: null, promoEndsAt: null, active: true, createdAt: now, updatedAt: now },
+    { name: "Noiva Civil", description: "Valor e duração iniciais de referência. Edite as informações no painel conforme necessário.", durationMinutes: 90, basePriceCents: 25000, promoPriceCents: null, promoStartsAt: null, promoEndsAt: null, active: true, createdAt: now, updatedAt: now },
+    { name: "Dia da Noiva", description: "Valor e duração iniciais de referência. Edite as informações no painel conforme necessário.", durationMinutes: 120, basePriceCents: 60000, promoPriceCents: null, promoStartsAt: null, promoEndsAt: null, active: true, createdAt: now, updatedAt: now },
+    { name: "Curso Auto Maquiagem", description: "Valor e duração iniciais de referência. Edite as informações no painel conforme necessário.", durationMinutes: 120, basePriceCents: 20000, promoPriceCents: null, promoStartsAt: null, promoEndsAt: null, active: true, createdAt: now, updatedAt: now },
   ];
   const batch = sdk.writeBatch(db);
   examples.forEach((service) => batch.set(sdk.doc(sdk.collection(db, "services")), service));
   try {
     await batch.commit();
     await loadServices();
-    setDashboardAlert("Exemplos criados como ocultos. Edite os nomes, valores e descrições antes de ativar.");
+    setDashboardAlert("Serviços iniciais criados e publicados. Revise valores, durações e descrições no catálogo.");
   } catch (error) {
-    setDashboardAlert(error.message || "Não foi possível criar os exemplos.");
+    setDashboardAlert(error.message || "Não foi possível criar os serviços iniciais.");
   }
 }
 
@@ -740,3 +741,5 @@ if (!firebaseReady) {
     showUser(user);
   });
 }
+
+
