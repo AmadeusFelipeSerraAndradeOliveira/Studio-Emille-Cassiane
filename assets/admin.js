@@ -12,7 +12,7 @@ const dashboard = $("dashboard");
 const setupNotice = $("setup-notice");
 const views = ["agenda", "services", "schedule", "finance", "data"];
 const statusLabels = STATUS_LABELS;
-const terminalStatuses = ["refused", "expired", "cancelled"];
+const terminalStatuses = ["refused", "expired", "cancelled", "completed", "no_show"];
 let currentUser = null;
 let settings = { ...DEFAULT_SCHEDULE, lastExportAt: null, lastExportIds: [], lastCleanupAt: null, lastCleanupCount: 0 };
 let services = [];
@@ -942,5 +942,4 @@ if (!firebaseReady) {
     showUser(user);
   });
 }
-
 
