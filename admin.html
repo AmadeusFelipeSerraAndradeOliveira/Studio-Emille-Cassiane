@@ -23,12 +23,12 @@
       <section id="dashboard" class="dashboard" hidden>
         <div class="dashboard-top"><div><p class="eyebrow">VISÃO GERAL</p><h1>Agenda do <em>studio.</em></h1></div><div class="dashboard-user"><span id="admin-email"></span><button id="logout-button" class="button button-outline" type="button">Sair</button></div></div>
         <div id="dashboard-alert" class="dashboard-alert" role="status" hidden></div>
-        <nav class="admin-tabs" aria-label="Seções administrativas"><button class="is-active" data-view="agenda" type="button">Agenda</button><button data-view="services" type="button">Serviços</button><button data-view="schedule" type="button">Expediente</button><button data-view="data" type="button">Relatórios e dados</button></nav>
+        <nav class="admin-tabs" aria-label="Seções administrativas"><button class="is-active" data-view="agenda" type="button">Agenda</button><button data-view="services" type="button">Serviços</button><button data-view="schedule" type="button">Expediente</button><button data-view="finance" type="button">Financeiro</button><button data-view="data" type="button">Relatórios e dados</button></nav>
 
         <section class="admin-view" id="view-agenda">
           <div class="view-heading"><div><p class="eyebrow">PEDIDOS E HORÁRIOS</p><h2>Agenda</h2></div><div class="view-controls"><select id="range-mode" aria-label="Período da agenda"><option value="upcoming">Próximos</option><option value="day">Dia</option><option value="week">Semana</option><option value="month">Mês</option></select><input id="range-date" type="date" aria-label="Data da agenda"><button id="refresh-agenda" class="button button-outline" type="button">Atualizar</button></div></div>
           <div id="stat-cards" class="stat-grid"></div>
-          <div class="filter-bar"><label class="search-field">Buscar nome ou telefone<input id="search-bookings" type="search" placeholder="Digite para filtrar…"></label><label>Profissional<input id="employee-filter" type="search" placeholder="Todos"></label><label>Status<select id="status-filter"><option value="all">Todos</option><option value="pending">Pendentes</option><option value="confirmed">Confirmados</option><option value="refused">Recusados</option><option value="expired">Expirados</option><option value="cancelled">Cancelados</option></select></label></div>
+          <div class="filter-bar"><label class="search-field">Buscar nome ou telefone<input id="search-bookings" type="search" placeholder="Digite para filtrar…"></label><label>Profissional<input id="employee-filter" type="search" placeholder="Todos"></label><label>Status<select id="status-filter"><option value="all">Todos</option><option value="pending">Pendentes</option><option value="confirmed">Confirmados</option><option value="refused">Recusados</option><option value="expired">Expirados</option><option value="cancelled">Cancelados</option><option value="completed">Finalizados</option><option value="no_show">Não compareceu</option></select></label></div>
           <div id="booking-list" class="booking-list" aria-live="polite"></div><div class="pagination"><button id="load-more" class="button button-outline" type="button" hidden>Carregar mais</button><span id="agenda-count"></span></div>
         </section>
 
@@ -46,6 +46,15 @@
           <div class="schedule-note"><strong>Fuso horário do projeto</strong><p>America/Araguaina (UTC−03:00). A alteração do fuso também exige ajustar a constante indicada nas regras Firestore.</p></div>
         </section>
 
+        <section class="admin-view" id="view-finance" hidden>
+          <div class="view-heading"><div><p class="eyebrow">CONTROLE OPERACIONAL</p><h2>Financeiro</h2></div><div class="view-controls"><label>Mês<input id="finance-month" type="month" aria-label="Mês do financeiro"></label><button id="refresh-finance" class="button button-outline" type="button">Atualizar</button><button id="export-finance" class="button button-outline" type="button">Exportar CSV</button></div></div>
+          <p class="view-intro">Resumo de valores recebidos, atendimentos concluídos e despesas registradas. Registre os recebimentos ao finalizar cada atendimento.</p>
+          <div id="finance-stats" class="stat-grid"></div>
+          <div class="data-card"><div><h3>Registrar despesa</h3><p>Inclua custos e despesas do studio para acompanhar o resultado operacional do mês.</p></div></div>
+          <form id="expense-form" class="settings-form"><div class="field-row"><label>Data *<input name="occurredOn" type="date" required></label><label>Valor (R$) *<input name="amount" type="number" min="0.01" step="0.01" required></label></div><div class="field-row"><label>Categoria *<select name="category" required><option value="">Selecione</option><option>Produtos e materiais</option><option>Aluguel</option><option>Água, luz e internet</option><option>Taxas e tarifas</option><option>Marketing</option><option>Manutenção</option><option>Profissionais</option><option>Outros</option></select></label><label>Descrição *<input name="description" maxlength="120" required></label></div><button class="button button-dark" type="submit">Salvar despesa</button><p id="expense-status" class="form-status" role="status"></p></form>
+          <h3>Despesas do mês</h3><div id="expense-list" class="booking-list" aria-live="polite"></div>
+          <p class="data-warning">Este painel é um controle interno de caixa. Ele não emite nota fiscal nem substitui os registros e obrigações fiscais aplicáveis ao seu negócio.</p>
+        </section>
         <section class="admin-view" id="view-data" hidden>
           <div class="view-heading"><div><p class="eyebrow">CONTROLE E MANUTENÇÃO</p><h2>Relatórios e dados</h2></div></div>
           <div class="data-card"><div><h3>Exportação da agenda</h3><p>Exporte os resultados carregados na agenda em CSV, compatível com Excel. Para imprimir ou salvar em PDF, use a impressão do navegador.</p></div><div class="button-row"><button id="export-current" class="button button-outline" type="button">Exportar CSV da agenda</button><button id="print-current" class="button button-outline" type="button">Imprimir / salvar PDF</button></div></div>
@@ -54,9 +63,10 @@
           <div class="data-card"><div><h3>Consumo do Firebase</h3><p>As leituras da agenda são limitadas e carregadas por período. Confira as cotas e o uso real no Console Firebase; os limites e preços podem mudar.</p></div><a class="button button-outline" href="https://console.firebase.google.com/" target="_blank" rel="noopener">Abrir Firebase Console ↗</a></div>
           <div class="privacy-reminder"><strong>Privacidade</strong><p>Solicite apenas os dados necessários para responder ao pedido. Defina uma política de privacidade adequada à operação do studio e às obrigações legais locais.</p><a href="privacy.html" target="_blank" rel="noopener">Ver aviso do site</a></div>
         </section>
-      </section>
+        <dialog id="payment-dialog" class="app-dialog"><form id="payment-form" method="dialog"><div class="dialog-heading"><div><p class="eyebrow">FECHAMENTO DO ATENDIMENTO</p><h3>Concluir atendimento</h3></div><button class="dialog-close" value="cancel" aria-label="Fechar">×</button></div><input name="bookingId" type="hidden"><p id="payment-booking-summary"></p><label>Valor recebido (R$)<input name="receivedAmount" type="number" min="0" step="0.01" required></label><label>Forma de pagamento<select name="paymentMethod"><option value="none">Ainda não recebeu</option><option value="pix">Pix</option><option value="credit">Cartão de crédito</option><option value="debit">Cartão de débito</option><option value="cash">Dinheiro</option><option value="transfer">Transferência</option><option value="other">Outro</option></select></label><div class="dialog-actions"><button class="button button-outline" value="cancel">Voltar</button><button class="button button-dark" value="save">Finalizar atendimento</button></div><p id="payment-status" class="form-status" role="status"></p></form></dialog>      </section>
     </main>
     <footer class="site-footer admin-footer"><a class="text-link" href="privacy.html">Aviso de privacidade</a><a class="text-link" href="index.html">Voltar ao site</a></footer>
     <script type="module" src="assets/admin.js"></script>
   </body>
 </html>
+
