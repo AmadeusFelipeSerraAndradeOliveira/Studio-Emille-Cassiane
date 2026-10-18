@@ -2,6 +2,7 @@ export const CONFIG = Object.freeze({
   studioName: "Studio Emille Cassiane",
   whatsappE164: "5563984007189", // +55 63 98400-7189
   address: "Bertaville, Rua Zeca de Moraes, QD 32, LT 09",
+  mapsUrl: "https://www.google.com/maps/dir//-10.2939906,-48.3173194/@-10.2940926,-48.3181758,18.75z/data=!4m2!4m1!3e0?entry=ttu&g_ep=EgoyMDI2MTAxMy4wIKXMDSoASAFQAw%3D%3D",
   instagramUrl: "",
   timezone: "America/Araguaina",
   recaptchaV3SiteKey: "", // Opcional: configure App Check depois de registrar o site.
@@ -31,5 +32,6 @@ export const DEFAULT_SCHEDULE = Object.freeze({
   retentionDays: 60,
   retentionEnabled: false,
 });
+
 
 
