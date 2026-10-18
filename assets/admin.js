@@ -159,11 +159,13 @@ function renderAgenda() {
   const container = $("booking-list");
   container.replaceChildren();
   const queryText = $("search-bookings").value.trim().toLowerCase();
+  const employeeQuery = $("employee-filter").value.trim().toLowerCase();
   const statusFilter = $("status-filter").value;
   const displayed = agendaBookings.filter((booking) => {
     const status = displayStatus(booking);
     const searchable = `${booking.name} ${booking.phone}`.toLowerCase();
-    return (statusFilter === "all" || status === statusFilter) && (!queryText || searchable.includes(queryText));
+    const employee = String(booking.employeeName || booking.staffName || "").toLowerCase();
+    return (statusFilter === "all" || status === statusFilter) && (!queryText || searchable.includes(queryText)) && (!employeeQuery || employee.includes(employeeQuery));
   });
   if (!displayed.length) {
     const empty = document.createElement("div");
@@ -202,7 +204,9 @@ function createBookingRow(booking) {
   serviceName.textContent = booking.serviceName;
   const price = document.createElement("span");
   price.textContent = `${centsToMoney(booking.priceCents)} · ${booking.durationMinutes} min`;
-  service.append(serviceName, price);
+  const assigned = document.createElement("span");
+  assigned.textContent = `Profissional: ${booking.employeeName || booking.staffName || "Não informado"}`;
+  service.append(serviceName, price, assigned);
   const time = document.createElement("div");
   time.className = "booking-time";
   const timeDate = document.createElement("strong");
@@ -212,13 +216,23 @@ function createBookingRow(booking) {
   pill.className = `status-pill status-${status}`;
   pill.textContent = statusLabels[status] || status;
   time.append(timeDate, pill);
+  const created = document.createElement("small");
+  created.textContent = `Solicitado: ${booking.createdAt?.toDate ? formatDateTime(booking.createdAt, CONFIG.timezone) : "data indisponível"}`;
+  time.append(created);
+  if (booking.expiresAt && status === "pending") {
+    const expiry = document.createElement("small");
+    expiry.textContent = `Vence: ${formatDateTime(booking.expiresAt, CONFIG.timezone)}`;
+    time.append(expiry);
+  }
   const actions = document.createElement("div");
   actions.className = "booking-actions";
   if (status === "pending") {
     addMiniButton(actions, "Aprovar", () => changeBookingStatus(booking.id, "confirmed"));
     addMiniButton(actions, "Recusar", () => changeBookingStatus(booking.id, "refused", true));
   } else if (status === "confirmed") {
-    const message = `Olá, ${booking.name}! Seu horário no ${CONFIG.studioName} foi confirmado: ${booking.serviceName}, ${formatDateTime(booking.slotAt, CONFIG.timezone)}. Valor: ${centsToMoney(booking.priceCents)}.`;
+    const professional = booking.employeeName || booking.staffName;
+    const professionalText = professional ? ` Profissional: ${professional}.` : "";
+    const message = `Olá, ${booking.name}! Seu horário no ${CONFIG.studioName} foi confirmado: ${booking.serviceName}, ${formatDateTime(booking.slotAt, CONFIG.timezone)}.${professionalText} Valor: ${centsToMoney(booking.priceCents)}.`;
     let phoneDigits = String(booking.phone).replace(/\D/g, "");
     if (phoneDigits.length === 10 || phoneDigits.length === 11) phoneDigits = `55${phoneDigits}`;
     const link = document.createElement("a");
@@ -251,16 +265,18 @@ async function loadAgenda(reset = false) {
   try {
     const mode = $("range-mode").value;
     const date = $("range-date").value || localDateInputValue(CONFIG.timezone);
-    const range = buildPeriodRange(mode, date, CONFIG.timezone);
+    const range = mode === "upcoming" ? null : buildPeriodRange(mode, date, CONFIG.timezone);
     if (reset) {
       agendaBookings = [];
       agendaCursor = null;
       agendaHasMore = false;
     }
-    let q = sdk.query(sdk.collection(db, "bookings"),
-      sdk.where("slotAt", ">=", sdk.Timestamp.fromDate(range.start)),
-      sdk.where("slotAt", "<", sdk.Timestamp.fromDate(range.end)),
-      sdk.orderBy("slotAt", "asc"), sdk.limit(100));
+    let q = mode === "upcoming"
+      ? sdk.query(sdk.collection(db, "bookings"), sdk.where("slotAt", ">=", sdk.Timestamp.now()), sdk.orderBy("slotAt", "asc"), sdk.limit(100))
+      : sdk.query(sdk.collection(db, "bookings"),
+          sdk.where("slotAt", ">=", sdk.Timestamp.fromDate(range.start)),
+          sdk.where("slotAt", "<", sdk.Timestamp.fromDate(range.end)),
+          sdk.orderBy("slotAt", "asc"), sdk.limit(100));
     if (agendaCursor && !reset) q = sdk.query(q, sdk.startAfter(agendaCursor));
     const snapshot = await sdk.getDocs(q);
     const batch = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
@@ -696,6 +712,7 @@ $("range-mode").addEventListener("change", () => loadAgenda(true));
 $("range-date").addEventListener("change", () => loadAgenda(true));
 $("search-bookings").addEventListener("input", renderAgenda);
 $("status-filter").addEventListener("change", renderAgenda);
+$("employee-filter").addEventListener("input", renderAgenda);
 $("new-service").addEventListener("click", () => services.length ? openServiceDialog() : openServiceDialog());
 $("service-dialog").querySelector(".dialog-close").addEventListener("click", () => $("service-dialog").close());
 $("service-form").addEventListener("submit", (event) => {
