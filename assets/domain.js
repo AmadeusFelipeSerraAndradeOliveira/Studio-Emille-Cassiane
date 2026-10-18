@@ -4,6 +4,8 @@ export const STATUS_LABELS = Object.freeze({
   refused: "Recusado",
   expired: "Expirado",
   cancelled: "Cancelado",
+  completed: "Finalizado",
+  no_show: "Não compareceu",
 });
 
 export function centsToMoney(cents) {
@@ -170,4 +172,20 @@ export function csvCell(value) {
 
 export function makeCsv(rows) {
   return "\uFEFF" + rows.map((row) => row.map(csvCell).join(";")).join("\r\n");
+}
+
+export function summarizeFinance(bookings, expenses, receipts = bookings) {
+  const completed = bookings.filter((booking) => booking.status === "completed");
+  const receivedCents = receipts.reduce((sum, booking) => sum + Number(booking.receivedCents || 0), 0);
+  const receivableCents = completed.reduce((sum, booking) => sum + Math.max(0, Number(booking.priceCents || 0) - Number(booking.receivedCents || 0)), 0);
+  const expenseCents = expenses.reduce((sum, expense) => sum + Number(expense.amountCents || 0), 0);
+  return {
+    receivedCents,
+    receivableCents,
+    expenseCents,
+    balanceCents: receivedCents - expenseCents,
+    completedCount: completed.length,
+    noShowCount: bookings.filter((booking) => booking.status === "no_show").length,
+    expenseCount: expenses.length,
+  };
 }
