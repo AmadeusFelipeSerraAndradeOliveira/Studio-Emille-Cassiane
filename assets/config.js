@@ -1,7 +1,7 @@
 export const CONFIG = Object.freeze({
   studioName: "Studio Emille Cassiane",
-  whatsappE164: "", // Somente números, com DDI e DDD. Ex.: 5511999999999
-  address: "", // Preencha apenas se quiser exibir o endereço publicamente.
+  whatsappE164: "5563984007189", // +55 63 98400-7189
+  address: "Bertaville, Rua Zeca de Moraes, QD 32, LT 09",
   instagramUrl: "",
   timezone: "America/Araguaina",
   recaptchaV3SiteKey: "", // Opcional: configure App Check depois de registrar o site.
@@ -24,10 +24,12 @@ export const DEFAULT_SCHEDULE = Object.freeze({
   closeMinute: 18 * 60,
   breakStartMinute: 12 * 60,
   breakEndMinute: 13 * 60,
-  workingDays: [1, 2, 3, 4, 5, 6],
+  workingDays: [1, 2, 3, 4, 5, 6, 7],
   holidays: [], // Inteiros: dias desde 1970-01-01 no calendário local do studio.
   minimumLeadMinutes: 120,
   daysAhead: 60,
   retentionDays: 60,
   retentionEnabled: false,
 });
+
+
