@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { initializeTestEnvironment, assertFails, assertSucceeds } from "@firebase/rules-unit-testing";
 import {
-  collection, doc, getDoc, getDocs, query, runTransaction, serverTimestamp, setDoc, Timestamp, updateDoc, where,
+  collection, deleteDoc, doc, getDoc, getDocs, query, runTransaction, serverTimestamp, setDoc, Timestamp, updateDoc, where,
 } from "firebase/firestore";
 import { getSlotLockIds, zonedDateTimeToUtc } from "../assets/domain.js";
 
@@ -158,4 +158,50 @@ test("somente UID autorizado consegue aprovar o pedido junto com seus bloqueios"
   });
   const confirmed = await getDoc(adminBookingRef);
   assert.equal(confirmed.data().status, "confirmed");
+});
+
+test("somente o administrador finaliza atendimento e remove bloqueios", async () => {
+  const visitor = testEnv.unauthenticatedContext().firestore();
+  const booking = await submitBooking(visitor, { slot: futureSlot(10, "11:30") });
+  const admin = testEnv.authenticatedContext(adminUid).firestore();
+  const bookingRef = doc(admin, "bookings", booking.bookingRef.id);
+  const locks = booking.lockIds.map((id) => doc(admin, "slotLocks", id));
+  await runTransaction(admin, async (transaction) => {
+    const fresh = await transaction.get(bookingRef);
+    await Promise.all(locks.map((ref) => transaction.get(ref)));
+    transaction.update(bookingRef, {
+      status: "confirmed", updatedAt: serverTimestamp(), decisionAt: serverTimestamp(),
+    });
+    locks.forEach((ref) => transaction.update(ref, { status: "confirmed", expiresAt: null }));
+  });
+  await runTransaction(admin, async (transaction) => {
+    await transaction.get(bookingRef);
+    await Promise.all(locks.map((ref) => transaction.get(ref)));
+    transaction.update(bookingRef, {
+      status: "completed", receivedCents: 7500, paymentMethod: "pix",
+      completedAt: serverTimestamp(), paymentAt: serverTimestamp(),
+      updatedAt: serverTimestamp(), decisionAt: serverTimestamp(),
+    });
+    locks.forEach((ref) => transaction.delete(ref));
+  });
+  assert.equal((await getDoc(bookingRef)).data().status, "completed");
+  await assertFails(updateDoc(doc(visitor, "bookings", booking.bookingRef.id), { status: "no_show" }));
+  await assertSucceeds(deleteDoc(bookingRef));
+  assert.equal((await getDoc(bookingRef)).exists(), false);
+});
+
+test("dados financeiros são privados e somente o administrador registra despesas", async () => {
+  const admin = testEnv.authenticatedContext(adminUid).firestore();
+  const visitor = testEnv.unauthenticatedContext().firestore();
+  const expense = doc(admin, "expenses", "expense-test");
+  await assertSucceeds(setDoc(expense, {
+    occurredAt: Timestamp.now(), amountCents: 12500, category: "Produtos e materiais",
+    description: "Itens de maquiagem", createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+  }));
+  await assertSucceeds(getDoc(expense));
+  await assertFails(getDoc(doc(visitor, "expenses", "expense-test")));
+  await assertFails(setDoc(doc(visitor, "expenses", "expense-public"), {
+    occurredAt: Timestamp.now(), amountCents: 1, category: "Teste", description: "Sem autorização",
+    createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+  }));
 });
