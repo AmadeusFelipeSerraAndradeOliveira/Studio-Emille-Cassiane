@@ -1,7 +1,7 @@
 import { CONFIG, DEFAULT_SCHEDULE } from "./config.js";
 import {
   STATUS_LABELS, addCalendarDays, buildPeriodRange, centsToMoney, currentPrice, eligibleForRetention,
-  epochDay, formatDateTime, getSlotLockIds, localDateInputValue, makeCsv, moneyToCents,
+  epochDay, formatDateTime, getSlotLockIds, localDateInputValue, makeCsv, moneyToCents, summarizeFinance,
   zonedDateTimeToUtc,
 } from "./domain.js";
 import { auth, db, firebaseReady, sdk } from "./firebase.js";
@@ -10,7 +10,7 @@ const $ = (id) => document.getElementById(id);
 const loginPanel = $("login-panel");
 const dashboard = $("dashboard");
 const setupNotice = $("setup-notice");
-const views = ["agenda", "services", "schedule", "data"];
+const views = ["agenda", "services", "schedule", "finance", "data"];
 const statusLabels = STATUS_LABELS;
 const terminalStatuses = ["refused", "expired", "cancelled"];
 let currentUser = null;
@@ -22,6 +22,8 @@ let agendaHasMore = false;
 let retentionCandidates = [];
 let retentionExportedIds = [];
 let isLoadingAgenda = false;
+let financeReceipts = [];
+let financeExpenses = [];
 
 for (const node of document.querySelectorAll("[data-studio-name]")) node.textContent = CONFIG.studioName;
 
@@ -129,6 +131,7 @@ function switchView(name) {
   document.querySelectorAll(".admin-tabs button").forEach((button) => button.classList.toggle("is-active", button.dataset.view === name));
   if (name === "agenda") loadAgenda(true);
   if (name === "services") loadServices();
+  if (name === "finance") loadFinance();
   if (name === "data") loadRetentionBatch();
 }
 
@@ -230,6 +233,8 @@ function createBookingRow(booking) {
     addMiniButton(actions, "Aprovar", () => changeBookingStatus(booking.id, "confirmed"));
     addMiniButton(actions, "Recusar", () => changeBookingStatus(booking.id, "refused", true));
   } else if (status === "confirmed") {
+    addMiniButton(actions, "Finalizar", () => openPaymentDialog(booking), "mini-button-success");
+    addMiniButton(actions, "Não compareceu", () => changeBookingStatus(booking.id, "no_show", true));
     const professional = booking.employeeName || booking.staffName;
     const professionalText = professional ? ` Profissional: ${professional}.` : "";
     const message = `Olá, ${booking.name}! Seu horário no ${CONFIG.studioName} foi confirmado: ${booking.serviceName}, ${formatDateTime(booking.slotAt, CONFIG.timezone)}.${professionalText} Valor: ${centsToMoney(booking.priceCents)}.`;
@@ -246,6 +251,7 @@ function createBookingRow(booking) {
   } else {
     actions.append(document.createTextNode("—"));
   }
+  addMiniButton(actions, "Excluir", () => deleteBookingManually(booking), "mini-button-danger");
   row.append(person, service, time, actions);
   if (booking.notes) {
     const note = document.createElement("div");
@@ -295,13 +301,15 @@ async function loadAgenda(reset = false) {
 }
 
 async function expirePendingBookings() {
-  const now = sdk.Timestamp.now();
-  const q = sdk.query(sdk.collection(db, "bookings"),
-    sdk.where("status", "==", "pending"), sdk.where("expiresAt", "<=", now),
-    sdk.orderBy("expiresAt"), sdk.limit(100));
-  const stale = await sdk.getDocs(q);
+  // Consulta apenas pendentes: usa o índice simples de status, sem composto.
+  const pending = await sdk.getDocs(sdk.query(sdk.collection(db, "bookings"), sdk.where("status", "==", "pending")));
+  const now = Date.now();
+  const stale = pending.docs.filter((item) => {
+    const expiry = item.data().expiresAt?.toDate?.();
+    return expiry instanceof Date && expiry.getTime() <= now;
+  });
   let expiredCount = 0;
-  for (const item of stale.docs) {
+  for (const item of stale) {
     const bookingRef = item.ref;
     let wasExpired = false;
     await sdk.runTransaction(db, async (transaction) => {
@@ -320,11 +328,20 @@ async function expirePendingBookings() {
   }
   if (expiredCount) setDashboardAlert(`${expiredCount} pedido(s) pendente(s) expiraram e foram liberados ao abrir o painel.`);
 }
+function openPaymentDialog(booking) {
+  const form = $("payment-form");
+  form.elements.bookingId.value = booking.id;
+  form.elements.receivedAmount.value = (booking.priceCents / 100).toFixed(2);
+  form.elements.paymentMethod.value = "pix";
+  $("payment-booking-summary").textContent = `${booking.name} · ${booking.serviceName} · valor previsto ${centsToMoney(booking.priceCents)}`;
+  $("payment-status").textContent = "";
+  $("payment-dialog").showModal();
+}
 
-async function changeBookingStatus(id, nextStatus, ask = false) {
+async function changeBookingStatus(id, nextStatus, ask = false, extra = {}) {
   const bookingRef = sdk.doc(db, "bookings", id);
-  const labels = { confirmed: "aprovar", refused: "recusar", cancelled: "cancelar" };
-  if (ask && !window.confirm(`Confirma ${labels[nextStatus] || "alterar"} este pedido?`)) return;
+  const labels = { confirmed: "aprovar", refused: "recusar", cancelled: "cancelar", no_show: "marcar como não compareceu", completed: "finalizar" };
+  if (ask && !window.confirm(`Confirma ${labels[nextStatus] || "alterar"} este pedido?`)) return false;
   try {
     await sdk.runTransaction(db, async (transaction) => {
       const bookingSnapshot = await transaction.get(bookingRef);
@@ -332,11 +349,19 @@ async function changeBookingStatus(id, nextStatus, ask = false) {
       const booking = bookingSnapshot.data();
       const lockRefs = booking.slotLockIds.map((lockId) => sdk.doc(db, "slotLocks", lockId));
       const lockSnapshots = await Promise.all(lockRefs.map((ref) => transaction.get(ref)));
-      if (booking.status === "pending" && booking.expiresAt.toDate() <= new Date()) throw new Error("Este pedido já expirou. Atualize a agenda.");
-      if (nextStatus === "confirmed" && booking.status !== "pending") throw new Error("Somente pedidos pendentes podem ser aprovados.");
-      if (nextStatus === "refused" && booking.status !== "pending") throw new Error("Somente pedidos pendentes podem ser recusados.");
-      if (nextStatus === "cancelled" && booking.status !== "confirmed") throw new Error("Somente pedidos confirmados podem ser cancelados.");
-      transaction.update(bookingRef, { status: nextStatus, updatedAt: sdk.serverTimestamp(), decisionAt: sdk.serverTimestamp() });
+      if (booking.status === "pending" && booking.expiresAt.toDate() <= new Date() && nextStatus !== "expired") throw new Error("Este pedido já expirou. Atualize a agenda.");
+      const allowed = (booking.status === "pending" && ["confirmed", "refused", "expired", "cancelled"].includes(nextStatus)) ||
+        (booking.status === "confirmed" && ["cancelled", "completed", "no_show"].includes(nextStatus));
+      if (!allowed) throw new Error("Esta alteração de status não é permitida.");
+      const update = { status: nextStatus, updatedAt: sdk.serverTimestamp(), decisionAt: sdk.serverTimestamp() };
+      if (nextStatus === "completed") Object.assign(update, {
+        receivedCents: extra.receivedCents,
+        paymentMethod: extra.paymentMethod,
+        completedAt: sdk.serverTimestamp(),
+        paymentAt: extra.receivedCents > 0 ? sdk.serverTimestamp() : null,
+      });
+      if (nextStatus === "no_show") Object.assign(update, { receivedCents: 0, paymentMethod: "none", completedAt: sdk.serverTimestamp(), paymentAt: null });
+      transaction.update(bookingRef, update);
       lockRefs.forEach((ref, index) => {
         if (!lockSnapshots[index].exists() || lockSnapshots[index].data().bookingId !== id) return;
         if (nextStatus === "confirmed") transaction.update(ref, { status: "confirmed", expiresAt: null });
@@ -346,12 +371,60 @@ async function changeBookingStatus(id, nextStatus, ask = false) {
     setDashboardAlert(nextStatus === "confirmed" ? "Pedido confirmado. Use o botão WhatsApp para enviar a mensagem de confirmação." : `Pedido ${statusLabels[nextStatus].toLowerCase()}.`);
     await loadAgenda(true);
     await loadRetentionBatch();
+    await loadFinance();
+    return true;
   } catch (error) {
     console.error("Falha ao atualizar pedido", error);
     setDashboardAlert(error.message || "Não foi possível atualizar o pedido. Atualize a agenda e tente novamente.");
+    return false;
   }
 }
 
+async function deleteBookingManually(booking) {
+  if (!window.confirm(`Excluir permanentemente o pedido de ${booking.name} para ${booking.serviceName}? Esta ação remove o registro e não pode ser desfeita. Para apenas liberar o horário, use Recusar ou Cancelar.`)) return;
+  const ref = sdk.doc(db, "bookings", booking.id);
+  try {
+    await sdk.runTransaction(db, async (transaction) => {
+      const snapshot = await transaction.get(ref);
+      if (!snapshot.exists()) return;
+      const current = snapshot.data();
+      const locks = (current.slotLockIds || []).map((id) => sdk.doc(db, "slotLocks", id));
+      const lockSnaps = await Promise.all(locks.map((lock) => transaction.get(lock)));
+      if (["pending", "confirmed"].includes(current.status)) {
+        transaction.update(ref, { status: "cancelled", updatedAt: sdk.serverTimestamp(), decisionAt: sdk.serverTimestamp() });
+        locks.forEach((lock, index) => {
+          if (lockSnaps[index].exists() && lockSnaps[index].data().bookingId === booking.id) transaction.delete(lock);
+        });
+      }
+    });
+    await sdk.deleteDoc(ref);
+    setDashboardAlert("Reserva excluída permanentemente.");
+    await loadAgenda(true);
+    await loadRetentionBatch();
+    await loadFinance();
+  } catch (error) {
+    console.error("Falha ao excluir reserva", error);
+    setDashboardAlert(error.message || "Não foi possível excluir a reserva.");
+  }
+}
+
+async function completeBooking(event) {
+  event.preventDefault();
+  const form = $("payment-form");
+  if (!form.reportValidity()) return;
+  const booking = agendaBookings.find((item) => item.id === form.elements.bookingId.value);
+  if (!booking) { setStatus("payment-status", "Atualize a agenda e tente novamente.", true); return; }
+  const receivedCents = Math.round(Number(form.elements.receivedAmount.value) * 100);
+  const paymentMethod = form.elements.paymentMethod.value;
+  if (!Number.isInteger(receivedCents) || receivedCents < 0 || receivedCents > booking.priceCents) {
+    setStatus("payment-status", "O valor recebido deve ficar entre R$ 0,00 e o valor previsto.", true); return;
+  }
+  if (receivedCents > 0 && paymentMethod === "none") {
+    setStatus("payment-status", "Selecione a forma de pagamento do valor recebido.", true); return;
+  }
+  const succeeded = await changeBookingStatus(booking.id, "completed", false, { receivedCents, paymentMethod: receivedCents ? paymentMethod : "none" });
+  if (succeeded) { $("payment-dialog").close(); await loadFinance(); }
+}
 async function loadServices() {
   if (!currentUser) return;
   const container = $("admin-service-list");
@@ -530,15 +603,14 @@ function downloadCsv(filename, rows) {
 
 function bookingCsvRows(bookings) {
   return [
-    ["Nome", "Telefone", "Serviço", "Duração (min)", "Valor registrado (R$)", "Data e hora", "Status", "Observações", "Solicitado em"],
+    ["Nome", "Telefone", "Serviço", "Profissional", "Duração (min)", "Valor registrado (R$)", "Recebido (R$)", "Data e hora", "Status", "Observações", "Solicitado em"],
     ...bookings.map((booking) => [
-      booking.name, booking.phone, booking.serviceName, booking.durationMinutes,
-      (booking.priceCents / 100).toFixed(2).replace(".", ","), formatDateTime(booking.slotAt, CONFIG.timezone),
-      statusLabels[displayStatus(booking)], booking.notes || "", formatDateTime(booking.createdAt, CONFIG.timezone),
+      booking.name, booking.phone, booking.serviceName, booking.employeeName || booking.staffName || "", booking.durationMinutes,
+      (booking.priceCents / 100).toFixed(2).replace(".", ","), (Number(booking.receivedCents || 0) / 100).toFixed(2).replace(".", ","),
+      formatDateTime(booking.slotAt, CONFIG.timezone), statusLabels[displayStatus(booking)], booking.notes || "", formatDateTime(booking.createdAt, CONFIG.timezone),
     ]),
   ];
 }
-
 function exportCurrentAgenda() {
   if (!agendaBookings.length) {
     setDashboardAlert("Não há reservas carregadas para exportar. Abra a agenda e selecione um período.");
@@ -548,6 +620,110 @@ function exportCurrentAgenda() {
   setDashboardAlert(`CSV exportado com ${agendaBookings.length} reserva(s) carregada(s). Use a impressão do navegador para salvar em PDF.`);
 }
 
+function addFinanceStat(container, label, value, note = "") {
+  const card = document.createElement("div");
+  card.className = "stat-card";
+  const title = document.createElement("span"); title.textContent = label;
+  const amount = document.createElement("strong"); amount.textContent = value;
+  card.append(title, amount);
+  if (note) { const detail = document.createElement("small"); detail.textContent = note; card.append(detail); }
+  container.append(card);
+}
+
+async function loadFinance() {
+  if (!currentUser) return;
+  const monthInput = $("finance-month");
+  if (!monthInput.value) monthInput.value = localDateInputValue(CONFIG.timezone).slice(0, 7);
+  const first = `${monthInput.value}-01`;
+  const range = buildPeriodRange("month", first, CONFIG.timezone);
+  const start = sdk.Timestamp.fromDate(range.start), end = sdk.Timestamp.fromDate(range.end);
+  try {
+    const bookingQuery = sdk.query(sdk.collection(db, "bookings"), sdk.where("slotAt", ">=", start), sdk.where("slotAt", "<", end), sdk.orderBy("slotAt", "asc"), sdk.limit(500));
+    const paymentQuery = sdk.query(sdk.collection(db, "bookings"), sdk.where("paymentAt", ">=", start), sdk.where("paymentAt", "<", end), sdk.orderBy("paymentAt", "asc"), sdk.limit(500));
+    const expenseQuery = sdk.query(sdk.collection(db, "expenses"), sdk.where("occurredAt", ">=", start), sdk.where("occurredAt", "<", end), sdk.orderBy("occurredAt", "asc"), sdk.limit(500));
+    const [bookingSnapshot, paymentSnapshot, expenseSnapshot] = await Promise.all([sdk.getDocs(bookingQuery), sdk.getDocs(paymentQuery), sdk.getDocs(expenseQuery)]);
+    const bookings = bookingSnapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+    const receipts = paymentSnapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+    const expenses = expenseSnapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+    financeReceipts = receipts;
+    financeExpenses = expenses;
+    const summary = summarizeFinance(bookings, expenses, receipts);
+    const stats = $("finance-stats"); stats.replaceChildren();
+    addFinanceStat(stats, "Recebido", centsToMoney(summary.receivedCents), `${summary.completedCount} atendimento(s) finalizado(s)`);
+    addFinanceStat(stats, "Despesas", centsToMoney(summary.expenseCents), `${summary.expenseCount} lançamento(s)`);
+    addFinanceStat(stats, "Saldo operacional", centsToMoney(summary.balanceCents));
+    addFinanceStat(stats, "A receber", centsToMoney(summary.receivableCents), "Atendimentos finalizados com saldo em aberto");
+    addFinanceStat(stats, "Não compareceu", String(summary.noShowCount));
+    renderExpenseList(expenses);
+    if (bookingSnapshot.size === 500 || paymentSnapshot.size === 500 || expenseSnapshot.size === 500) setDashboardAlert("O financeiro mostra até 500 reservas, recebimentos e despesas neste mês. Exporte os dados se precisar de um fechamento maior.");
+  } catch (error) {
+    console.error("Falha ao carregar financeiro", error);
+    setDashboardAlert("Não foi possível carregar o financeiro. Confira conexão, permissões e índices Firestore.");
+  }
+}
+
+function exportFinanceCsv() {
+  const rows = [["Tipo", "Data", "Descrição", "Categoria / forma", "Cliente", "Serviço", "Valor (R$)"]];
+  financeReceipts.forEach((item) => rows.push(["Recebimento", formatDateTime(item.paymentAt, CONFIG.timezone), "Atendimento", item.paymentMethod || "", item.name || "", item.serviceName || "", (Number(item.receivedCents || 0) / 100).toFixed(2).replace(".", ",")]));
+  financeExpenses.forEach((item) => rows.push(["Despesa", formatDateTime(item.occurredAt, CONFIG.timezone), item.description, item.category, "", "", (-Number(item.amountCents || 0) / 100).toFixed(2).replace(".", ",")]));
+  if (rows.length === 1) { setDashboardAlert("Não há recebimentos ou despesas neste mês para exportar."); return; }
+  downloadCsv(`financeiro-${$("finance-month").value}.csv`, rows);
+}
+function renderExpenseList(expenses) {
+  const list = $("expense-list"); list.replaceChildren();
+  if (!expenses.length) { const empty = document.createElement("div"); empty.className = "empty-state"; empty.textContent = "Nenhuma despesa cadastrada neste mês."; list.append(empty); return; }
+  for (const expense of expenses) {
+    const row = document.createElement("article"); row.className = "booking-row";
+    const desc = document.createElement("div"); desc.className = "booking-person";
+    const title = document.createElement("strong"); title.textContent = expense.description;
+    const category = document.createElement("span"); category.textContent = expense.category;
+    desc.append(title, category);
+    const date = document.createElement("div"); date.className = "booking-time"; date.textContent = formatDateTime(expense.occurredAt, CONFIG.timezone);
+    const amount = document.createElement("strong"); amount.textContent = `− ${centsToMoney(expense.amountCents)}`;
+    const actions = document.createElement("div"); actions.className = "booking-actions";
+    addMiniButton(actions, "Excluir", () => deleteExpense(expense));
+    row.append(desc, date, amount, actions); list.append(row);
+  }
+}
+
+async function saveExpense(event) {
+  event.preventDefault();
+  const form = $("expense-form");
+  if (!form.reportValidity()) return;
+  try {
+    const data = {
+      occurredAt: sdk.Timestamp.fromDate(zonedDateTimeToUtc(form.elements.occurredOn.value, "12:00", CONFIG.timezone)),
+      amountCents: moneyToCents(form.elements.amount.value),
+      category: form.elements.category.value,
+      description: form.elements.description.value.trim(),
+      createdAt: sdk.serverTimestamp(), updatedAt: sdk.serverTimestamp(),
+    };
+    if (data.description.length < 2) throw new Error("Descreva a despesa.");
+    await sdk.setDoc(sdk.doc(sdk.collection(db, "expenses")), data);
+    form.reset(); form.elements.occurredOn.value = localDateInputValue(CONFIG.timezone);
+    setStatus("expense-status", "Despesa registrada.");
+    await loadFinance();
+  } catch (error) { console.error("Falha ao salvar despesa", error); setStatus("expense-status", error.message || "Não foi possível salvar a despesa.", true); }
+}
+
+async function deleteExpense(expense) {
+  if (!window.confirm(`Excluir a despesa “${expense.description}” de ${centsToMoney(expense.amountCents)}?`)) return;
+  try { await sdk.deleteDoc(sdk.doc(db, "expenses", expense.id)); await loadFinance(); }
+  catch (error) { setDashboardAlert(error.message || "Não foi possível excluir a despesa."); }
+}
+async function fetchRetentionCandidates(cutoff, batchSize) {
+  const found = [];
+  let cursor = null;
+  while (found.length < batchSize) {
+    const constraints = [sdk.where("status", "in", terminalStatuses), sdk.limit(100)];
+    if (cursor) constraints.push(sdk.startAfter(cursor));
+    const snapshot = await sdk.getDocs(sdk.query(sdk.collection(db, "bookings"), ...constraints));
+    found.push(...snapshot.docs.map((item) => ({ id: item.id, ...item.data() })).filter((booking) => eligibleForRetention(booking, cutoff)));
+    if (snapshot.size < 100) break;
+    cursor = snapshot.docs.at(-1);
+  }
+  return found.sort((a, b) => a.slotAt.toMillis() - b.slotAt.toMillis()).slice(0, batchSize);
+}
 async function loadRetentionBatch() {
   if (!currentUser || !settings.retentionEnabled) {
     $("retention-batch").hidden = true;
@@ -555,12 +731,7 @@ async function loadRetentionBatch() {
   }
   try {
     const cutoff = new Date(Date.now() - settings.retentionDays * 86_400_000);
-    const q = sdk.query(sdk.collection(db, "bookings"),
-      sdk.where("status", "in", terminalStatuses), sdk.where("slotAt", "<", sdk.Timestamp.fromDate(cutoff)),
-      sdk.orderBy("slotAt", "asc"), sdk.limit(100));
-    const snapshot = await sdk.getDocs(q);
-    retentionCandidates = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }))
-      .filter((booking) => eligibleForRetention(booking, cutoff));
+    retentionCandidates = await fetchRetentionCandidates(cutoff, 100);
     $("retention-batch").hidden = !retentionCandidates.length;
     retentionExportedIds = [];
     $("delete-old").disabled = true;
@@ -726,11 +897,19 @@ $("service-form").addEventListener("submit", (event) => {
   saveService(event).catch((error) => setStatus("service-status", error.message, true));
 });
 $("schedule-form").addEventListener("submit", saveSchedule);
+$("payment-dialog").querySelector(".dialog-close").addEventListener("click", () => $("payment-dialog").close());
+$("payment-form").addEventListener("submit", (event) => { if ($("payment-form").querySelector("button[value=cancel]") === document.activeElement) return; completeBooking(event).catch((error) => setStatus("payment-status", error.message || "Falha ao finalizar.", true)); });
+$("expense-form").addEventListener("submit", saveExpense);
+$("finance-month").addEventListener("change", loadFinance);
+$("refresh-finance").addEventListener("click", loadFinance);
+$("export-finance").addEventListener("click", exportFinanceCsv);
+$("expense-form").elements.occurredOn.value = localDateInputValue(CONFIG.timezone);
 $("export-current").addEventListener("click", exportCurrentAgenda);
 $("print-current").addEventListener("click", () => window.print());
 $("retention-toggle").addEventListener("click", toggleRetention);
 $("export-old").addEventListener("click", exportOldRecords);
 $("delete-old").addEventListener("click", deleteExportedBatch);
+
 
 // Catálogo de exemplo fica acessível no estado vazio, sem publicar dados ilustrativos.
 const serviceEmptyObserver = new MutationObserver(() => {
