@@ -670,7 +670,12 @@ async function loadAdminData() {
       settingsSnapshot.exists() ? settingsSnapshot.data() : DEFAULT_SCHEDULE,
       maintenanceSnapshot.exists() ? maintenanceSnapshot.data() : {},
     );
-    await expirePendingBookings();
+    try {
+      await expirePendingBookings();
+    } catch (cleanupError) {
+      console.error("Falha ao liberar pedidos vencidos; a agenda continuará disponível", cleanupError);
+      setDashboardAlert("A agenda abriu, mas a liberação automática de pedidos vencidos falhou. Confira os índices do Firestore no Console.");
+    }
     await loadAgenda(true);
     await loadRetentionBatch();
   } catch (error) {
