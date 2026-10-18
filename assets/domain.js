@@ -150,7 +150,7 @@ export function bookingIsLogicallyExpired(booking, now = new Date()) {
 
 export function eligibleForRetention(booking, cutoff, now = new Date()) {
   const status = booking.status;
-  const terminal = ["refused", "expired", "cancelled"].includes(status);
+  const terminal = ["refused", "expired", "cancelled", "completed", "no_show"].includes(status);
   const at = booking.slotAt?.toDate?.() ?? new Date(booking.slotAt);
   return terminal && at instanceof Date && !Number.isNaN(at.getTime()) && at < cutoff && at < now;
 }
