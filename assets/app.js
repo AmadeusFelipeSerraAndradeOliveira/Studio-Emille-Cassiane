@@ -103,17 +103,25 @@ function renderContact() {
   const phone = CONFIG.whatsappE164.replace(/\D/g, "");
   const contact = byId("contact-whatsapp");
   const bookingContact = byId("booking-whatsapp");
+  const whatsappButton = byId("contact-whatsapp-button");
+  const directionsButton = byId("contact-directions-button");
   if (phone) {
     contact.textContent = "+" + phone;
     contact.href = "https://wa.me/" + phone;
     contact.target = "_blank";
     contact.rel = "noopener noreferrer";
+    whatsappButton.href = "https://wa.me/" + phone;
+    whatsappButton.hidden = false;
     bookingContact.href = whatsappUrl(CONFIG.whatsappE164, "Olá! Gostaria de informações sobre os serviços e horários do Studio Emille Cassiane.");
     bookingContact.target = "_blank";
     bookingContact.rel = "noopener noreferrer";
     bookingContact.hidden = false;
   }
   if (CONFIG.address) byId("contact-address").textContent = CONFIG.address;
+  if (CONFIG.mapsUrl) {
+    directionsButton.href = CONFIG.mapsUrl;
+    directionsButton.hidden = false;
+  }
   if (schedule?.enabled) {
     const days = schedule.workingDays.map((day) => ["", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"][day]).join(", ");
     byId("contact-hours").textContent = days + " · " + formatMinute(schedule.openMinute) + " às " + formatMinute(schedule.closeMinute) + " (horário local)";
@@ -332,4 +340,5 @@ renderServiceCards();
 fillServiceSelect();
 renderContact();
 setDateBounds();
+
 
