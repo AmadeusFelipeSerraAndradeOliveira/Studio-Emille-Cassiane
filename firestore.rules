@@ -200,17 +200,39 @@ service cloud.firestore {
         getAfter(path).data.expiresAt == request.resource.data.expiresAt;
     }
 
+    function validExpense(data) {
+      return data.keys().hasAll(['occurredAt', 'amountCents', 'category', 'description', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['occurredAt', 'amountCents', 'category', 'description', 'createdAt', 'updatedAt']) &&
+        data.occurredAt is timestamp && data.amountCents is int && data.amountCents > 0 && data.amountCents <= 100000000 &&
+        data.category is string && data.category.size() >= 2 && data.category.size() <= 60 &&
+        data.description is string && data.description.size() >= 2 && data.description.size() <= 120 &&
+        data.createdAt is timestamp && data.updatedAt is timestamp;
+    }
     function adminBookingTransition(bookingId) {
       let next = request.resource.data.status;
       let previous = resource.data.status;
-      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt', 'decisionAt']) &&
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      let isCompleted = next == 'completed' &&
+        changed.hasAll(['receivedCents', 'paymentMethod', 'completedAt', 'paymentAt']) &&
+        request.resource.data.receivedCents is int && request.resource.data.receivedCents >= 0 &&
+        request.resource.data.receivedCents <= resource.data.priceCents &&
+        request.resource.data.paymentMethod in ['none', 'pix', 'credit', 'debit', 'cash', 'transfer', 'other'] &&
+        request.resource.data.completedAt == request.time &&
+        ((request.resource.data.receivedCents == 0 && request.resource.data.paymentMethod == 'none' && request.resource.data.paymentAt == null) ||
+         (request.resource.data.receivedCents > 0 && request.resource.data.paymentMethod != 'none' && request.resource.data.paymentAt == request.time));
+      let isNoShow = next == 'no_show' &&
+        changed.hasAll(['receivedCents', 'paymentMethod', 'completedAt', 'paymentAt']) &&
+        request.resource.data.receivedCents == 0 && request.resource.data.paymentMethod == 'none' &&
+        request.resource.data.completedAt == request.time && request.resource.data.paymentAt == null;
+      return changed.hasOnly(['status', 'updatedAt', 'decisionAt', 'receivedCents', 'paymentMethod', 'completedAt', 'paymentAt']) &&
         request.resource.data.updatedAt == request.time && request.resource.data.decisionAt == request.time &&
-        ((previous == 'pending' && next == 'confirmed' && allLocksHaveStatus(request.resource.data, bookingId, 'confirmed')) ||
-         (previous == 'pending' && next == 'refused' && allLocksHaveStatus(request.resource.data, bookingId, 'released')) ||
-         (previous == 'pending' && next == 'expired' && resource.data.expiresAt <= request.time && allLocksHaveStatus(request.resource.data, bookingId, 'released')) ||
-         (previous == 'confirmed' && next == 'cancelled' && allLocksHaveStatus(request.resource.data, bookingId, 'released')));
+        ((previous == 'pending' && next == 'confirmed' && changed.hasOnly(['status', 'updatedAt', 'decisionAt']) && allLocksHaveStatus(request.resource.data, bookingId, 'confirmed')) ||
+         (previous == 'pending' && next in ['refused', 'expired', 'cancelled'] && changed.hasOnly(['status', 'updatedAt', 'decisionAt']) &&
+           (next != 'expired' || resource.data.expiresAt <= request.time) && allLocksHaveStatus(request.resource.data, bookingId, 'released')) ||
+         (previous == 'confirmed' && next == 'cancelled' && changed.hasOnly(['status', 'updatedAt', 'decisionAt']) && allLocksHaveStatus(request.resource.data, bookingId, 'released')) ||
+         (previous == 'confirmed' && next == 'completed' && isCompleted && allLocksHaveStatus(request.resource.data, bookingId, 'released')) ||
+         (previous == 'confirmed' && next == 'no_show' && isNoShow && allLocksHaveStatus(request.resource.data, bookingId, 'released')));
     }
-
     match /services/{serviceId} {
       allow get, list: if isAdmin() || resource.data.active == true;
       allow create: if isAdmin() && validService(request.resource.data) && request.resource.data.createdAt == request.time && request.resource.data.updatedAt == request.time;
@@ -246,7 +268,7 @@ service cloud.firestore {
           request.resource.data.status == 'confirmed' && request.resource.data.expiresAt == null &&
           request.resource.data.slotAt == resource.data.slotAt) || validPublicLockWrite(lockId);
       allow delete: if isAdmin() && existsAfter(bookingPath(resource.data.bookingId)) &&
-        getAfter(bookingPath(resource.data.bookingId)).data.status in ['refused', 'expired', 'cancelled'] &&
+        getAfter(bookingPath(resource.data.bookingId)).data.status in ['refused', 'expired', 'cancelled', 'completed', 'no_show'] &&
         getAfter(bookingPath(resource.data.bookingId)).data.slotLockIds.hasAny([lockId]);
     }
 
@@ -254,11 +276,17 @@ service cloud.firestore {
       allow get, list: if isAdmin();
       allow create: if validBookingCreate(bookingId, request.resource.data);
       allow update: if isAdmin() && adminBookingTransition(bookingId);
-      // A exclusão administrativa só pode remover pedidos encerrados com mais de 60 dias.
-      allow delete: if isAdmin() && resource.data.status in ['refused', 'expired', 'cancelled'] &&
-        resource.data.slotAt < request.time - duration.value(60, 'd');
+      // Exclusão manual é permitida apenas ao administrador. Pedidos ativos devem liberar os bloqueios antes.
+      allow delete: if isAdmin() && resource.data.status in ['refused', 'expired', 'cancelled', 'completed', 'no_show'];
     }
 
+    match /expenses/{expenseId} {
+      allow get, list: if isAdmin();
+      allow create: if isAdmin() && validExpense(request.resource.data) && request.resource.data.createdAt == request.time && request.resource.data.updatedAt == request.time;
+      allow update: if isAdmin() && validExpense(request.resource.data) && request.resource.data.createdAt == resource.data.createdAt && request.resource.data.updatedAt == request.time;
+      allow delete: if isAdmin();
+    }
     // Nenhuma regra genérica concede leitura ou escrita em caminhos futuros.
   }
 }
+
