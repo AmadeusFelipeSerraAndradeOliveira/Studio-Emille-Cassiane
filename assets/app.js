@@ -102,16 +102,21 @@ function fillServiceSelect() {
 function renderContact() {
   const phone = CONFIG.whatsappE164.replace(/\D/g, "");
   const contact = byId("contact-whatsapp");
+  const bookingContact = byId("booking-whatsapp");
   if (phone) {
-    contact.textContent = `+${phone}`;
-    contact.href = `https://wa.me/${phone}`;
+    contact.textContent = "+" + phone;
+    contact.href = "https://wa.me/" + phone;
     contact.target = "_blank";
     contact.rel = "noopener noreferrer";
+    bookingContact.href = whatsappUrl(CONFIG.whatsappE164, "Olá! Gostaria de informações sobre os serviços e horários do Studio Emille Cassiane.");
+    bookingContact.target = "_blank";
+    bookingContact.rel = "noopener noreferrer";
+    bookingContact.hidden = false;
   }
   if (CONFIG.address) byId("contact-address").textContent = CONFIG.address;
   if (schedule?.enabled) {
     const days = schedule.workingDays.map((day) => ["", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"][day]).join(", ");
-    byId("contact-hours").textContent = `${days} · ${formatMinute(schedule.openMinute)} às ${formatMinute(schedule.closeMinute)} (horário local)`;
+    byId("contact-hours").textContent = days + " · " + formatMinute(schedule.openMinute) + " às " + formatMinute(schedule.closeMinute) + " (horário local)";
   }
   if (CONFIG.instagramUrl) {
     const link = document.createElement("a");
@@ -122,7 +127,6 @@ function renderContact() {
     byId("contact-social").append(link);
   }
 }
-
 function formatMinute(value) {
   return `${String(Math.floor(value / 60)).padStart(2, "0")}:${String(value % 60).padStart(2, "0")}`;
 }
@@ -151,8 +155,12 @@ async function loadPublicData() {
     ]);
     services = serviceSnapshot.docs.map((item) => ({ id: item.id, ...item.data() })).sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
     schedule = scheduleSnapshot.exists() ? scheduleSnapshot.data() : null;
-    if (!schedule?.enabled) {
-      byId("services-message").textContent = "O catálogo está carregado. O studio ainda precisa publicar o expediente no painel para receber pedidos.";
+    const missingSetup = [];
+    if (!services.length) missingSetup.push("pelo menos um serviço ativo");
+    if (!schedule?.enabled) missingSetup.push("o expediente");
+    if (missingSetup.length) {
+      byId("services-message").textContent = "Para liberar o agendamento online, o studio precisa cadastrar " + missingSetup.join(" e ") + " no painel.";
+      showFormMessage("O agendamento online ainda não está habilitado. Use o WhatsApp enquanto o studio conclui o cadastro.");
     }
   } catch (error) {
     console.error("Falha ao carregar informações públicas", error);
@@ -324,3 +332,4 @@ renderServiceCards();
 fillServiceSelect();
 renderContact();
 setDateBounds();
+
