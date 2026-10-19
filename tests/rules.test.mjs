@@ -34,6 +34,15 @@ before(async () => {
     const database = context.firestore();
     await setDoc(doc(database, "services", "service-test"), serviceData);
     await setDoc(doc(database, "settings", "public"), scheduleData);
+    await setDoc(doc(database, "staff", "emille"), {
+      name: "Emille", active: true, createdAt: Timestamp.now(), updatedAt: Timestamp.now(),
+    });
+    await setDoc(doc(database, "staff", "cassiane"), {
+      name: "Cassiane", active: true, createdAt: Timestamp.now(), updatedAt: Timestamp.now(),
+    });
+    await setDoc(doc(database, "staff", "inactive"), {
+      name: "Profissional inativa", active: false, createdAt: Timestamp.now(), updatedAt: Timestamp.now(),
+    });
   });
 });
 
@@ -57,6 +66,7 @@ async function submitBooking(database, options = {}) {
   const expiresAt = Timestamp.fromDate(new Date(Date.now() + 30 * 60_000));
   const booking = {
     name: "Ana Teste", phone: "11999998888", serviceId: "service-test", serviceName: "Serviço de teste",
+    staffId: options.staffId || "emille", staffName: options.staffName || (options.staffId === "cassiane" ? "Cassiane" : "Emille"),
     durationMinutes, priceCents: options.priceCents ?? 10000,
     slotAt: Timestamp.fromDate(slotAt), slotMinute: minute, slotLockIds: lockIds,
     notes: "", status: "pending", createdAt: serverTimestamp(), updatedAt: serverTimestamp(), expiresAt,
@@ -82,6 +92,9 @@ test("visitor lê serviços ativos, mas não lê nem lista reservas", async () =
   const visitor = testEnv.unauthenticatedContext().firestore();
   await assertSucceeds(getDocs(query(collection(visitor, "services"), where("active", "==", true))));
   await assertSucceeds(getDoc(doc(visitor, "settings", "public")));
+  await assertSucceeds(getDocs(query(collection(visitor, "staff"), where("active", "==", true))));
+  await assertFails(getDoc(doc(visitor, "staff", "inactive")));
+  await assertFails(setDoc(doc(visitor, "staff", "injected"), { name: "Fraude", active: true }));
   await assertFails(getDoc(doc(visitor, "settings", "admin")));
   await assertFails(getDoc(doc(visitor, "bookings", "guessable")));
   await assertFails(getDocs(collection(visitor, "bookings")));
@@ -93,6 +106,14 @@ test("criação atômica cria um pedido pendente e bloqueia as fatias sobreposta
   const first = await submitBooking(visitor, { slot });
   await assertFails(getDoc(first.bookingRef));
   await assert.rejects(() => submitBooking(visitor, { slot }), /slot occupied|permission/i);
+});
+
+test("pedido registra uma profissional ativa e rejeita nome adulterado ou profissional inativa", async () => {
+  const visitor = testEnv.unauthenticatedContext().firestore();
+  const valid = await submitBooking(visitor, { slot: futureSlot(11, "10:00"), staffId: "cassiane" });
+  assert.equal((await getDoc(doc(testEnv.authenticatedContext(adminUid).firestore(), "bookings", valid.bookingRef.id))).data().staffName, "Cassiane");
+  await assert.rejects(() => submitBooking(visitor, { slot: futureSlot(12, "10:00"), staffId: "inactive" }), /permission/i);
+  await assert.rejects(() => submitBooking(visitor, { slot: futureSlot(13, "10:00"), staffId: "cassiane", staffName: "Emille" }), /permission/i);
 });
 
 test("regras negam preço adulterado e acesso de usuário comum a status", async () => {
