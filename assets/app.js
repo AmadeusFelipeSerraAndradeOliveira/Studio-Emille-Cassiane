@@ -6,15 +6,20 @@ const byId = (id) => document.getElementById(id);
 const form = byId("booking-form");
 const bookingDate = byId("booking-date");
 const serviceSelect = byId("booking-service");
+const staffSelect = byId("booking-staff");
 const timeSelect = byId("booking-time");
 const submitButton = byId("booking-submit");
 const bookingStatus = byId("booking-status");
 const demoMode = new URLSearchParams(location.search).get("demo") === "1";
 
 let services = [];
+let staff = [];
 let schedule = null;
 let availableSlots = [];
 let slotsLoading = false;
+let availabilityRequest = 0;
+let stopScheduleWatch = null;
+let stopStaffWatch = null;
 
 for (const node of document.querySelectorAll("[data-studio-name]")) node.textContent = CONFIG.studioName;
 byId("year").textContent = new Date().getFullYear();
@@ -99,17 +104,18 @@ function fillServiceSelect() {
   });
 }
 
+function fillStaffSelect(selectedId = staffSelect.value) {
+  staffSelect.replaceChildren(new Option("Selecione uma profissional", ""));
+  staff.forEach((person) => staffSelect.add(new Option(person.name, person.id)));
+  if (staff.some((person) => person.id === selectedId)) staffSelect.value = selectedId;
+}
+
 function renderContact() {
   const phone = CONFIG.whatsappE164.replace(/\D/g, "");
-  const contact = byId("contact-whatsapp");
   const bookingContact = byId("booking-whatsapp");
   const whatsappButton = byId("contact-whatsapp-button");
   const directionsButton = byId("contact-directions-button");
   if (phone) {
-    contact.textContent = "+" + phone;
-    contact.href = "https://wa.me/" + phone;
-    contact.target = "_blank";
-    contact.rel = "noopener noreferrer";
     whatsappButton.href = "https://wa.me/" + phone;
     whatsappButton.hidden = false;
     bookingContact.href = whatsappUrl(CONFIG.whatsappE164, "Olá! Gostaria de informações sobre os serviços e horários do Studio Emille Cassiane.");
@@ -117,26 +123,10 @@ function renderContact() {
     bookingContact.rel = "noopener noreferrer";
     bookingContact.hidden = false;
   }
-  if (CONFIG.address) byId("contact-address").textContent = CONFIG.address;
   if (CONFIG.mapsUrl) {
     directionsButton.href = CONFIG.mapsUrl;
     directionsButton.hidden = false;
   }
-  if (schedule?.enabled) {
-    const days = schedule.workingDays.map((day) => ["", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"][day]).join(", ");
-    byId("contact-hours").textContent = days + " · " + formatMinute(schedule.openMinute) + " às " + formatMinute(schedule.closeMinute) + " (horário local)";
-  }
-  if (CONFIG.instagramUrl) {
-    const link = document.createElement("a");
-    link.href = CONFIG.instagramUrl;
-    link.target = "_blank";
-    link.rel = "noopener noreferrer";
-    link.textContent = "Instagram ↗";
-    byId("contact-social").append(link);
-  }
-}
-function formatMinute(value) {
-  return `${String(Math.floor(value / 60)).padStart(2, "0")}:${String(value % 60).padStart(2, "0")}`;
 }
 
 async function loadPublicData() {
@@ -146,6 +136,7 @@ async function loadPublicData() {
       { id: "demo-design", name: "Design de sobrancelhas", description: "Design personalizado para realçar seu olhar.", durationMinutes: 30, basePriceCents: 4000, promoPriceCents: 3200, promoStartsAt: new Date(Date.now() - 86_400_000), promoEndsAt: new Date(Date.now() + 7 * 86_400_000), active: true },
       { id: "demo-hair", name: "Escova", description: "Finalização com movimento e brilho.", durationMinutes: 60, basePriceCents: 8000, active: true },
     ];
+    staff = [{ id: "demo-emille", name: "Emille", active: true }];
     schedule = { ...DEFAULT_SCHEDULE, enabled: true, workingDays: [1, 2, 3, 4, 5, 6], minimumLeadMinutes: 0, daysAhead: 60 };
     byId("demo-banner").hidden = false;
     byId("services-message").textContent = "Valores e horários ilustrativos, somente para conhecer a interface.";
@@ -157,19 +148,39 @@ async function loadPublicData() {
     return;
   }
   try {
-    const [serviceSnapshot, scheduleSnapshot] = await Promise.all([
+    const [serviceSnapshot, scheduleSnapshot, staffSnapshot] = await Promise.all([
       sdk.getDocs(sdk.query(sdk.collection(db, "services"), sdk.where("active", "==", true), sdk.limit(30))),
       sdk.getDoc(sdk.doc(db, "settings", "public")),
+      sdk.getDocs(sdk.query(sdk.collection(db, "staff"), sdk.where("active", "==", true), sdk.limit(50))),
     ]);
     services = serviceSnapshot.docs.map((item) => ({ id: item.id, ...item.data() })).sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+    staff = staffSnapshot.docs.map((item) => ({ id: item.id, ...item.data() })).sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
     schedule = scheduleSnapshot.exists() ? scheduleSnapshot.data() : null;
     const missingSetup = [];
     if (!services.length) missingSetup.push("pelo menos um serviço ativo");
+    if (!staff.length) missingSetup.push("pelo menos uma profissional ativa");
     if (!schedule?.enabled) missingSetup.push("o expediente");
     if (missingSetup.length) {
       byId("services-message").textContent = "Para liberar o agendamento online, o studio precisa cadastrar " + missingSetup.join(" e ") + " no painel.";
       showFormMessage("O agendamento online ainda não está habilitado. Use o WhatsApp enquanto o studio conclui o cadastro.");
     }
+    stopScheduleWatch?.();
+    stopStaffWatch?.();
+    stopScheduleWatch = sdk.onSnapshot(sdk.doc(db, "settings", "public"), (snapshot) => {
+      schedule = snapshot.exists() ? snapshot.data() : null;
+      setDateBounds();
+      void refreshAvailableTimes();
+    }, (error) => console.error("Falha ao acompanhar alterações do expediente", error));
+    stopStaffWatch = sdk.onSnapshot(
+      sdk.query(sdk.collection(db, "staff"), sdk.where("active", "==", true), sdk.limit(50)),
+      (snapshot) => {
+        const selectedId = staffSelect.value;
+        staff = snapshot.docs.map((item) => ({ id: item.id, ...item.data() })).sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+        fillStaffSelect(selectedId);
+        void refreshAvailableTimes();
+      },
+      (error) => console.error("Falha ao acompanhar profissionais", error),
+    );
   } catch (error) {
     console.error("Falha ao carregar informações públicas", error);
     byId("services-message").textContent = "Não foi possível carregar os serviços. Verifique a conexão e tente novamente.";
@@ -178,6 +189,7 @@ async function loadPublicData() {
 }
 
 async function refreshAvailableTimes() {
+  const requestId = ++availabilityRequest;
   const date = bookingDate.value;
   const selectedService = services.find((item) => item.id === serviceSelect.value);
   timeSelect.replaceChildren(new Option("Buscando horários…", ""));
@@ -199,6 +211,7 @@ async function refreshAvailableTimes() {
     try {
       const lockIds = [...new Set(candidates.flatMap((slot) => slot.lockIds))];
       const snapshots = await Promise.all(lockIds.map((id) => sdk.getDoc(sdk.doc(db, "slotLocks", id))));
+      if (requestId !== availabilityRequest) return;
       const lockById = new Map(lockIds.map((id, index) => [id, snapshots[index]]));
       availableSlots = candidates.filter((slot) => slot.lockIds.every((id) => {
         const lock = lockById.get(id);
@@ -242,6 +255,8 @@ async function reserveSlot(payload, selectedSlot, selectedService) {
       phone: payload.phone,
       serviceId: selectedService.id,
       serviceName: selectedService.name,
+      staffId: payload.staffId,
+      staffName: payload.staffName,
       durationMinutes: selectedService.durationMinutes,
       priceCents: price,
       slotAt: sdk.Timestamp.fromDate(selectedSlot.slotAt),
@@ -268,9 +283,10 @@ form.addEventListener("submit", async (event) => {
   if (!form.reportValidity()) return;
   const data = new FormData(form);
   const service = services.find((item) => item.id === data.get("serviceId"));
+  const selectedStaff = staff.find((item) => item.id === data.get("staffId"));
   const selected = availableSlots.find((item) => item.time === data.get("time"));
-  if (!service || !selected) {
-    showFormMessage("Selecione um serviço e um horário disponível.", true);
+  if (!service || !selectedStaff || !selected) {
+    showFormMessage("Selecione o serviço, a profissional e um horário disponível.", true);
     return;
   }
   if (!demoMode && (!firebaseReady || !schedule?.enabled)) {
@@ -306,12 +322,12 @@ form.addEventListener("submit", async (event) => {
     const reservationId = crypto.randomUUID();
     const price = demoMode
       ? currentPrice(service).cents
-      : await reserveSlot({ id: reservationId, name, phone, notes }, selected, service);
+      : await reserveSlot({ id: reservationId, name, phone, notes, staffId: selectedStaff.id, staffName: selectedStaff.name }, selected, service);
     if (demoMode) {
       showFormMessage("Demonstração concluída. Nenhum agendamento foi gravado nem enviado.");
     } else {
       const dateLabel = new Intl.DateTimeFormat("pt-BR", { timeZone: CONFIG.timezone, dateStyle: "short" }).format(selected.slotAt);
-      const message = `Olá! Meu nome é ${name}. Solicitei um horário para ${service.name} em ${dateLabel}, às ${selected.time}. Valor informado: ${centsToMoney(price)}. Sei que o pedido está pendente até a aprovação do studio.`;
+      const message = `Olá! Meu nome é ${name}. Solicitei um horário para ${service.name} com ${selectedStaff.name} em ${dateLabel}, às ${selected.time}. Valor informado: ${centsToMoney(price)}. Sei que o pedido está pendente até a aprovação do studio.`;
       const url = whatsappUrl(CONFIG.whatsappE164, message);
       if (whatsappWindow) whatsappWindow.location.href = url;
       else if (CONFIG.whatsappE164) showFormMessage("Pedido recebido e pendente de aprovação. Se o WhatsApp não abriu, use o link abaixo.", false, url);
@@ -333,12 +349,13 @@ form.addEventListener("submit", async (event) => {
 });
 
 serviceSelect.addEventListener("change", refreshAvailableTimes);
+staffSelect.addEventListener("change", refreshAvailableTimes);
 bookingDate.addEventListener("change", refreshAvailableTimes);
 
 await loadPublicData();
 renderServiceCards();
 fillServiceSelect();
+fillStaffSelect();
 renderContact();
 setDateBounds();
-
 
