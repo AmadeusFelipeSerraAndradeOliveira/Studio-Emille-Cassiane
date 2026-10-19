@@ -20,6 +20,7 @@ let slotsLoading = false;
 let availabilityRequest = 0;
 let stopScheduleWatch = null;
 let stopStaffWatch = null;
+let stopServicesWatch = null;
 
 for (const node of document.querySelectorAll("[data-studio-name]")) node.textContent = CONFIG.studioName;
 byId("year").textContent = new Date().getFullYear();
@@ -96,12 +97,13 @@ function renderServiceCards() {
   });
 }
 
-function fillServiceSelect() {
+function fillServiceSelect(selectedId = serviceSelect.value) {
   serviceSelect.replaceChildren(new Option("Selecione um serviço", ""));
   services.forEach((service) => {
     const option = new Option(`${service.name} · ${centsToMoney(currentPrice(service).cents)}`, service.id);
     serviceSelect.add(option);
   });
+  if (services.some((service) => service.id === selectedId)) serviceSelect.value = selectedId;
 }
 
 function fillStaffSelect(selectedId = staffSelect.value) {
@@ -166,6 +168,20 @@ async function loadPublicData() {
     }
     stopScheduleWatch?.();
     stopStaffWatch?.();
+    stopServicesWatch?.();
+    stopServicesWatch = sdk.onSnapshot(
+      sdk.query(sdk.collection(db, "services"), sdk.where("active", "==", true), sdk.limit(30)),
+      (snapshot) => {
+        const selectedId = serviceSelect.value;
+        services = snapshot.docs.map((item) => ({ id: item.id, ...item.data() })).sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+        fillServiceSelect(selectedId);
+        renderServiceCards();
+        if (!services.length) byId("services-message").textContent = "O studio ainda não cadastrou serviços ativos.";
+        else byId("services-message").textContent = "";
+        void refreshAvailableTimes();
+      },
+      (error) => console.error("Falha ao acompanhar o catálogo de serviços", error),
+    );
     stopScheduleWatch = sdk.onSnapshot(sdk.doc(db, "settings", "public"), (snapshot) => {
       schedule = snapshot.exists() ? snapshot.data() : null;
       setDateBounds();
