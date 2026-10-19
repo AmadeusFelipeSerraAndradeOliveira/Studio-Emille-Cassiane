@@ -23,7 +23,7 @@
       <section id="dashboard" class="dashboard" hidden>
         <div class="dashboard-top"><div><p class="eyebrow">VISÃO GERAL</p><h1>Agenda do <em>studio.</em></h1></div><div class="dashboard-user"><span id="admin-email"></span><button id="logout-button" class="button button-outline" type="button">Sair</button></div></div>
         <div id="dashboard-alert" class="dashboard-alert" role="status" hidden></div>
-        <nav class="admin-tabs" aria-label="Seções administrativas"><button class="is-active" data-view="agenda" type="button">Agenda</button><button data-view="services" type="button">Serviços</button><button data-view="schedule" type="button">Expediente</button><button data-view="finance" type="button">Financeiro</button><button data-view="data" type="button">Relatórios e dados</button></nav>
+        <nav class="admin-tabs" aria-label="Seções administrativas"><button class="is-active" data-view="agenda" type="button">Agenda</button><button data-view="services" type="button">Serviços</button><button data-view="staff" type="button">Profissionais</button><button data-view="schedule" type="button">Expediente</button><button data-view="finance" type="button">Financeiro</button><button data-view="data" type="button">Relatórios e dados</button></nav>
 
         <section class="admin-view" id="view-agenda">
           <div class="view-heading"><div><p class="eyebrow">PEDIDOS E HORÁRIOS</p><h2>Agenda</h2></div><div class="view-controls"><select id="range-mode" aria-label="Período da agenda"><option value="upcoming">Próximos</option><option value="day">Dia</option><option value="week">Semana</option><option value="month">Mês</option></select><input id="range-date" type="date" aria-label="Data da agenda"><button id="refresh-agenda" class="button button-outline" type="button">Atualizar</button></div></div>
@@ -37,6 +37,13 @@
           <p class="view-intro">Somente serviços ativos aparecem no site. O valor da reserva é registrado no momento do pedido.</p>
           <div id="admin-service-list" class="admin-service-list"></div>
           <dialog id="service-dialog" class="app-dialog"><form id="service-form" method="dialog"><div class="dialog-heading"><div><p class="eyebrow">CATÁLOGO</p><h3 id="service-dialog-title">Novo serviço</h3></div><button class="dialog-close" value="cancel" aria-label="Fechar">×</button></div><input name="id" type="hidden"><label>Nome *<input name="name" maxlength="70" required></label><label>Descrição *<textarea name="description" rows="3" maxlength="350" required></textarea></label><div class="field-row"><label>Duração (min) *<select name="durationMinutes" required><option value="30">30 min</option><option value="60">60 min</option><option value="90">90 min</option><option value="120">120 min</option></select></label><label>Preço normal (R$) *<input name="basePrice" type="number" min="0.01" step="0.01" required></label></div><div class="field-row"><label>Preço promocional (R$)<input name="promoPrice" type="number" min="0.01" step="0.01"></label><label>Oferta começa em<input name="promoStart" type="date"></label></div><label>Oferta termina em<input name="promoEnd" type="date"></label><label class="consent-check"><input name="active" type="checkbox" checked><span>Serviço ativo e visível no site</span></label><div class="dialog-actions"><button class="button button-outline" value="cancel">Cancelar</button><button id="save-service" class="button button-dark" value="save">Salvar serviço</button></div><p class="form-status" id="service-status" role="status"></p></form></dialog>
+        </section>
+
+        <section class="admin-view" id="view-staff" hidden>
+          <div class="view-heading"><div><p class="eyebrow">EQUIPE DO STUDIO</p><h2>Profissionais</h2></div></div>
+          <p class="view-intro">Cadastre quem atende no studio. Ao remover uma profissional, ela deixa de aparecer em novos pedidos; as reservas antigas continuam com o nome registrado.</p>
+          <form id="staff-form" class="staff-form"><label>Nome da profissional *<input name="name" maxlength="70" required placeholder="Nome para exibir no formulário"></label><button class="button button-dark" type="submit">Adicionar profissional</button><p id="staff-status" class="form-status" role="status"></p></form>
+          <div id="admin-staff-list" class="admin-service-list" aria-live="polite"></div>
         </section>
 
         <section class="admin-view" id="view-schedule" hidden>
