@@ -14,6 +14,10 @@ service cloud.firestore {
       return /databases/$(database)/documents/services/$(serviceId);
     }
 
+    function staffPath(staffId) {
+      return /databases/$(database)/documents/staff/$(staffId);
+    }
+
     function bookingPath(bookingId) {
       return /databases/$(database)/documents/bookings/$(bookingId);
     }
@@ -32,6 +36,15 @@ service cloud.firestore {
 
     function currentPrice(serviceData) {
       return isPromo(serviceData) ? serviceData.promoPriceCents : serviceData.basePriceCents;
+    }
+
+    function validStaffAssignment(data) {
+      return !data.keys().hasAny(['staffId', 'staffName']) ||
+        (data.keys().hasAll(['staffId', 'staffName']) &&
+         data.staffId is string && data.staffId.size() >= 1 && data.staffId.size() <= 100 &&
+         data.staffName is string && data.staffName.size() >= 2 && data.staffName.size() <= 70 &&
+         exists(staffPath(data.staffId)) && get(staffPath(data.staffId)).data.active == true &&
+         get(staffPath(data.staffId)).data.name == data.staffName);
     }
 
     function validService(data) {
@@ -166,10 +179,12 @@ service cloud.firestore {
         ]) &&
         data.keys().hasOnly([
           'name', 'phone', 'serviceId', 'serviceName', 'durationMinutes', 'priceCents',
-          'slotAt', 'slotMinute', 'slotLockIds', 'notes', 'status', 'createdAt', 'updatedAt', 'expiresAt'
+          'slotAt', 'slotMinute', 'slotLockIds', 'notes', 'status', 'createdAt', 'updatedAt', 'expiresAt',
+          'staffId', 'staffName'
         ]) &&
         data.name is string && data.name.size() >= 2 && data.name.size() <= 80 &&
         data.phone is string && data.phone.matches('^[0-9]{10,15}$') &&
+        validStaffAssignment(data) &&
         data.serviceId is string && exists(path) && serviceData.active == true &&
         data.serviceName == serviceData.name && data.durationMinutes == serviceData.durationMinutes &&
         data.priceCents is int && data.priceCents == currentPrice(serviceData) &&
@@ -240,6 +255,23 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    match /staff/{staffId} {
+      allow get, list: if isAdmin() || resource.data.active == true;
+      allow create: if isAdmin() &&
+        request.resource.data.keys().hasAll(['name', 'active', 'createdAt', 'updatedAt']) &&
+        request.resource.data.keys().hasOnly(['name', 'active', 'createdAt', 'updatedAt']) &&
+        request.resource.data.name is string && request.resource.data.name.size() >= 2 && request.resource.data.name.size() <= 70 &&
+        request.resource.data.active is bool && request.resource.data.createdAt == request.time &&
+        request.resource.data.updatedAt == request.time;
+      allow update: if isAdmin() &&
+        request.resource.data.keys().hasAll(['name', 'active', 'createdAt', 'updatedAt']) &&
+        request.resource.data.keys().hasOnly(['name', 'active', 'createdAt', 'updatedAt']) &&
+        request.resource.data.name is string && request.resource.data.name.size() >= 2 && request.resource.data.name.size() <= 70 &&
+        request.resource.data.active is bool && request.resource.data.createdAt == resource.data.createdAt &&
+        request.resource.data.updatedAt == request.time;
+      allow delete: if isAdmin();
+    }
+
     match /settings/public {
       allow get: if true;
       allow list: if false;
@@ -289,4 +321,3 @@ service cloud.firestore {
     // Nenhuma regra genérica concede leitura ou escrita em caminhos futuros.
   }
 }
-
