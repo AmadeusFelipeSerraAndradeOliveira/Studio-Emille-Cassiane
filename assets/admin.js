@@ -10,12 +10,13 @@ const $ = (id) => document.getElementById(id);
 const loginPanel = $("login-panel");
 const dashboard = $("dashboard");
 const setupNotice = $("setup-notice");
-const views = ["agenda", "services", "schedule", "finance", "data"];
+const views = ["agenda", "services", "staff", "schedule", "finance", "data"];
 const statusLabels = STATUS_LABELS;
 const terminalStatuses = ["refused", "expired", "cancelled", "completed", "no_show"];
 let currentUser = null;
 let settings = { ...DEFAULT_SCHEDULE, lastExportAt: null, lastExportIds: [], lastCleanupAt: null, lastCleanupCount: 0 };
 let services = [];
+let staff = [];
 let agendaBookings = [];
 let agendaCursor = null;
 let agendaHasMore = false;
@@ -141,6 +142,7 @@ function switchView(name) {
   document.querySelectorAll(".admin-tabs button").forEach((button) => button.classList.toggle("is-active", button.dataset.view === name));
   if (name === "agenda") loadAgenda(true);
   if (name === "services") loadServices();
+  if (name === "staff") loadStaff();
   if (name === "finance") loadFinance();
   if (name === "data") loadRetentionBatch();
 }
@@ -465,6 +467,97 @@ async function loadServices() {
   } catch (error) {
     console.error("Falha ao carregar serviços", error);
     setDashboardAlert("Não foi possível carregar o catálogo. Confira as permissões e a conexão.");
+  }
+}
+
+async function ensureInitialStaff() {
+  const ref = sdk.doc(db, "staff", "emille");
+  await sdk.runTransaction(db, async (transaction) => {
+    const existing = await transaction.get(ref);
+    if (!existing.exists()) {
+      transaction.set(ref, {
+        name: "Emille",
+        active: true,
+        createdAt: sdk.serverTimestamp(),
+        updatedAt: sdk.serverTimestamp(),
+      });
+    }
+  });
+}
+
+async function loadStaff() {
+  if (!currentUser) return;
+  const container = $("admin-staff-list");
+  container.replaceChildren();
+  try {
+    const snapshot = await sdk.getDocs(sdk.collection(db, "staff"));
+    staff = snapshot.docs.map((item) => ({ id: item.id, ...item.data() })).sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+    if (!staff.length) {
+      const empty = document.createElement("div");
+      empty.className = "empty-state";
+      empty.textContent = "Nenhuma profissional cadastrada.";
+      container.append(empty);
+    }
+    staff.forEach((person) => container.append(createAdminStaffCard(person)));
+  } catch (error) {
+    console.error("Falha ao carregar profissionais", error);
+    setStatus("staff-status", explainFirestoreError(error, "Não foi possível carregar a equipe."), true);
+  }
+}
+
+function createAdminStaffCard(person) {
+  const card = document.createElement("article");
+  card.className = "admin-service";
+  const text = document.createElement("div");
+  const title = document.createElement("h3");
+  title.textContent = person.name;
+  const details = document.createElement("p");
+  details.textContent = person.active ? "Ativa · disponível para novos pedidos" : "Inativa · não aparece em novos pedidos";
+  text.append(title, details);
+  const actions = document.createElement("div");
+  actions.className = "admin-service-actions";
+  addMiniButton(actions, person.active ? "Excluir" : "Reativar", () => toggleStaff(person), person.active ? "danger" : "");
+  card.append(text, actions);
+  return card;
+}
+
+async function saveStaff(event) {
+  event.preventDefault();
+  const form = $("staff-form");
+  if (!form.reportValidity()) return;
+  const name = form.elements.name.value.trim().replace(/\s+/g, " ");
+  if (name.length < 2) {
+    setStatus("staff-status", "Informe um nome com pelo menos duas letras.", true);
+    return;
+  }
+  const button = form.querySelector('button[type="submit"]');
+  button.disabled = true;
+  setStatus("staff-status", "Salvando profissional…");
+  try {
+    const duplicate = staff.some((person) => person.name.toLocaleLowerCase("pt-BR") === name.toLocaleLowerCase("pt-BR"));
+    if (duplicate) throw new Error("Já existe uma profissional com esse nome no cadastro.");
+    const ref = sdk.doc(sdk.collection(db, "staff"));
+    await sdk.setDoc(ref, { name, active: true, createdAt: sdk.serverTimestamp(), updatedAt: sdk.serverTimestamp() });
+    form.reset();
+    await loadStaff();
+    setStatus("staff-status", "Profissional adicionada ao formulário de agendamento.");
+  } catch (error) {
+    setStatus("staff-status", explainFirestoreError(error, "Não foi possível adicionar a profissional."), true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function toggleStaff(person) {
+  const nextActive = !person.active;
+  const action = nextActive ? "reativar" : "excluir";
+  if (!window.confirm(`Deseja ${action} ${person.name}? ${nextActive ? "Ela voltará a aparecer nos novos pedidos." : "Ela sairá dos novos pedidos e as reservas anteriores serão preservadas."}`)) return;
+  try {
+    await sdk.updateDoc(sdk.doc(db, "staff", person.id), { active: nextActive, updatedAt: sdk.serverTimestamp() });
+    await loadStaff();
+    setDashboardAlert(nextActive ? `${person.name} reativada.` : `${person.name} removida dos novos agendamentos.`);
+  } catch (error) {
+    setDashboardAlert(explainFirestoreError(error, "Não foi possível atualizar a profissional."));
   }
 }
 
@@ -922,6 +1015,8 @@ async function loadAdminData() {
       settingsSnapshot.exists() ? settingsSnapshot.data() : DEFAULT_SCHEDULE,
       maintenanceSnapshot.exists() ? maintenanceSnapshot.data() : {},
     );
+    await ensureInitialStaff();
+    await loadStaff();
     try {
       await expirePendingBookings();
     } catch (cleanupError) {
@@ -982,6 +1077,7 @@ $("service-form").addEventListener("submit", (event) => {
   saveService(event).catch((error) => setStatus("service-status", error.message, true));
 });
 $("schedule-form").addEventListener("submit", saveSchedule);
+$("staff-form").addEventListener("submit", saveStaff);
 $("payment-dialog").querySelector(".dialog-close").addEventListener("click", () => $("payment-dialog").close());
 $("payment-form").addEventListener("submit", (event) => { if ($("payment-form").querySelector("button[value=cancel]") === document.activeElement) return; completeBooking(event).catch((error) => setStatus("payment-status", error.message || "Falha ao finalizar.", true)); });
 $("expense-form").addEventListener("submit", saveExpense);
