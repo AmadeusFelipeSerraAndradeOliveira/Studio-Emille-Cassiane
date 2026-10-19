@@ -39,6 +39,16 @@ function setDashboardAlert(message = "") {
   node.hidden = !message;
 }
 
+function explainFirestoreError(error, fallback) {
+  if (error?.code === "permission-denied") {
+    return "O Firebase bloqueou esta ação. Publique as regras atualizadas do arquivo firestore.rules no projeto studio-cassiana-emille e atualize esta página.";
+  }
+  if (error?.code === "failed-precondition") {
+    return "O Firestore informou que esta consulta precisa de um índice. Confira a conexão e os índices do projeto.";
+  }
+  return error?.message || fallback;
+}
+
 function localMidnightTimestamp(dateString) {
   return sdk.Timestamp.fromDate(zonedDateTimeToUtc(dateString, "00:00", CONFIG.timezone));
 }
@@ -375,7 +385,9 @@ async function changeBookingStatus(id, nextStatus, ask = false, extra = {}) {
     return true;
   } catch (error) {
     console.error("Falha ao atualizar pedido", error);
-    setDashboardAlert(error.message || "Não foi possível atualizar o pedido. Atualize a agenda e tente novamente.");
+    const message = explainFirestoreError(error, "Não foi possível atualizar o pedido. Atualize a agenda e tente novamente.");
+    if (extra.statusId) setStatus(extra.statusId, message, true);
+    setDashboardAlert(message);
     return false;
   }
 }
@@ -422,8 +434,19 @@ async function completeBooking(event) {
   if (receivedCents > 0 && paymentMethod === "none") {
     setStatus("payment-status", "Selecione a forma de pagamento do valor recebido.", true); return;
   }
-  const succeeded = await changeBookingStatus(booking.id, "completed", false, { receivedCents, paymentMethod: receivedCents ? paymentMethod : "none" });
-  if (succeeded) { $("payment-dialog").close(); await loadFinance(); }
+  const button = form.querySelector('button[value="save"]');
+  button.disabled = true;
+  setStatus("payment-status", "Salvando o fechamento do atendimento…");
+  try {
+    const succeeded = await changeBookingStatus(booking.id, "completed", false, {
+      receivedCents,
+      paymentMethod: receivedCents ? paymentMethod : "none",
+      statusId: "payment-status",
+    });
+    if (succeeded) { $("payment-dialog").close(); await loadFinance(); }
+  } finally {
+    button.disabled = false;
+  }
 }
 async function loadServices() {
   if (!currentUser) return;
@@ -572,6 +595,9 @@ async function saveSchedule(event) {
   event.preventDefault();
   const form = $("schedule-form");
   if (!form.reportValidity()) return;
+  const button = form.querySelector('button[type="submit"]');
+  button.disabled = true;
+  setStatus("schedule-status", "Salvando expediente…");
   try {
     const next = formSchedule();
     if (!next.workingDays.length) throw new Error("Selecione ao menos um dia de atendimento.");
@@ -585,7 +611,9 @@ async function saveSchedule(event) {
     setStatus("schedule-status", "Expediente salvo. O site público já pode receber pedidos.");
     setDashboardAlert("Expediente publicado para os visitantes.");
   } catch (error) {
-    setStatus("schedule-status", error.message || "Não foi possível salvar o expediente.", true);
+    setStatus("schedule-status", explainFirestoreError(error, "Não foi possível salvar o expediente."), true);
+  } finally {
+    button.disabled = false;
   }
 }
 
@@ -617,7 +645,46 @@ function exportCurrentAgenda() {
     return;
   }
   downloadCsv(`agenda-studio-${localDateInputValue(CONFIG.timezone)}.csv`, bookingCsvRows(agendaBookings));
-  setDashboardAlert(`CSV exportado com ${agendaBookings.length} reserva(s) carregada(s). Use a impressão do navegador para salvar em PDF.`);
+  setDashboardAlert(`Relatório CSV gerado com ${agendaBookings.length} reserva(s) carregada(s).`);
+}
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;",
+  })[character]);
+}
+
+function printAgendaReport() {
+  const mode = $("range-mode").selectedOptions[0]?.textContent || "Período selecionado";
+  const selectedDate = $("range-date").value;
+  const search = $("search-bookings").value.trim().toLowerCase();
+  const statusFilter = $("status-filter").value;
+  const professional = $("employee-filter").value.trim().toLowerCase();
+  const bookings = agendaBookings.filter((booking) => {
+    const status = displayStatus(booking);
+    const person = `${booking.name} ${booking.phone}`.toLowerCase();
+    const employee = String(booking.employeeName || booking.staffName || "").toLowerCase();
+    return (statusFilter === "all" || status === statusFilter) && (!search || person.includes(search)) && (!professional || employee.includes(professional));
+  });
+  const total = bookings.reduce((sum, booking) => sum + Number(booking.priceCents || 0), 0);
+  const rows = bookings.map((booking) => `<tr>
+    <td>${escapeHtml(formatDateTime(booking.slotAt, CONFIG.timezone))}</td>
+    <td>${escapeHtml(booking.name)}</td><td>${escapeHtml(booking.phone)}</td>
+    <td>${escapeHtml(booking.serviceName)}</td><td>${escapeHtml(booking.employeeName || booking.staffName || "—")}</td>
+    <td>${escapeHtml(statusLabels[displayStatus(booking)] || displayStatus(booking))}</td>
+    <td>${escapeHtml(centsToMoney(booking.priceCents))}</td>
+  </tr>`).join("");
+  const report = window.open("", "_blank");
+  if (!report) {
+    setDashboardAlert("O navegador bloqueou a janela do relatório. Permita pop-ups para este site e tente novamente.");
+    return;
+  }
+  report.document.open();
+  report.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Relatório de reservas — ${escapeHtml(CONFIG.studioName)}</title><style>
+    body{font:14px Arial,sans-serif;color:#241f1b;margin:32px}h1{font:600 26px Georgia,serif;margin:0 0 6px}.muted{color:#746d67}.summary{display:flex;gap:30px;margin:22px 0;padding:14px;background:#f7f3ef;border-radius:8px}.summary strong{display:block;font-size:17px;margin-top:4px}table{width:100%;border-collapse:collapse;font-size:12px}th,td{padding:9px 7px;border-bottom:1px solid #e8e1db;text-align:left;vertical-align:top}th{background:#f7f3ef}.empty{text-align:center;padding:35px;color:#746d67}@media print{body{margin:14mm}.summary{background:#f7f3ef!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}tr{break-inside:avoid}thead{display:table-header-group}}
+  </style></head><body><h1>${escapeHtml(CONFIG.studioName)}</h1><div class="muted">Relatório de reservas · ${escapeHtml(mode)}${selectedDate ? ` · ${escapeHtml(selectedDate)}` : ""}</div><div class="muted">Gerado em ${escapeHtml(formatDateTime(new Date(), CONFIG.timezone))}</div><section class="summary"><div>Reservas<strong>${bookings.length}</strong></div><div>Valor previsto<strong>${escapeHtml(centsToMoney(total))}</strong></div></section><table><thead><tr><th>Data e hora</th><th>Cliente</th><th>Telefone</th><th>Serviço</th><th>Profissional</th><th>Status</th><th>Valor previsto</th></tr></thead><tbody>${rows || '<tr><td class="empty" colspan="7">Nenhuma reserva corresponde aos filtros atuais.</td></tr>'}</tbody></table><script>window.addEventListener('load',()=>setTimeout(()=>window.print(),200));</script></body></html>`);
+  report.document.close();
+  setDashboardAlert(`Relatório de reservas preparado com ${bookings.length} registro(s).`);
 }
 
 function addFinanceStat(container, label, value, note = "") {
@@ -658,7 +725,7 @@ async function loadFinance() {
     if (bookingSnapshot.size === 500 || paymentSnapshot.size === 500 || expenseSnapshot.size === 500) setDashboardAlert("O financeiro mostra até 500 reservas, recebimentos e despesas neste mês. Exporte os dados se precisar de um fechamento maior.");
   } catch (error) {
     console.error("Falha ao carregar financeiro", error);
-    setDashboardAlert("Não foi possível carregar o financeiro. Confira conexão, permissões e índices Firestore.");
+    setDashboardAlert(explainFirestoreError(error, "Não foi possível carregar o financeiro. Confira a conexão e as permissões do Firestore."));
   }
 }
 
@@ -690,6 +757,9 @@ async function saveExpense(event) {
   event.preventDefault();
   const form = $("expense-form");
   if (!form.reportValidity()) return;
+  const button = form.querySelector('button[type="submit"]');
+  button.disabled = true;
+  setStatus("expense-status", "Salvando despesa…");
   try {
     const data = {
       occurredAt: sdk.Timestamp.fromDate(zonedDateTimeToUtc(form.elements.occurredOn.value, "12:00", CONFIG.timezone)),
@@ -703,7 +773,8 @@ async function saveExpense(event) {
     form.reset(); form.elements.occurredOn.value = localDateInputValue(CONFIG.timezone);
     setStatus("expense-status", "Despesa registrada.");
     await loadFinance();
-  } catch (error) { console.error("Falha ao salvar despesa", error); setStatus("expense-status", error.message || "Não foi possível salvar a despesa.", true); }
+  } catch (error) { console.error("Falha ao salvar despesa", error); setStatus("expense-status", explainFirestoreError(error, "Não foi possível salvar a despesa."), true); }
+  finally { button.disabled = false; }
 }
 
 async function deleteExpense(expense) {
@@ -751,13 +822,21 @@ async function loadRetentionBatch() {
   } catch (error) {
     console.error("Falha ao consultar retenção", error);
     $("retention-batch").hidden = false;
-    $("retention-batch-copy").textContent = "Não foi possível buscar os registros elegíveis. Confira a conexão e o índice do Firestore.";
-    setStatus("retention-status", error.message || "Falha ao buscar registros.", true);
+    $("retention-batch-copy").textContent = error?.code === "permission-denied"
+      ? "As regras atuais do Firestore não autorizam esta consulta. Publique as regras atualizadas do arquivo firestore.rules."
+      : "Não foi possível buscar os registros elegíveis. Confira a conexão e os índices do Firestore.";
+    setStatus("retention-status", explainFirestoreError(error, "Falha ao buscar registros."), true);
   }
 }
 
 async function exportOldRecords() {
-  if (!retentionCandidates.length) return;
+  if (!retentionCandidates.length) {
+    setStatus("retention-status", "Não há reservas elegíveis neste lote.", true);
+    return;
+  }
+  const exportButton = $("export-old");
+  exportButton.disabled = true;
+  setStatus("retention-status", "Gerando o CSV e registrando a exportação…");
   downloadCsv(`reservas-antigas-${localDateInputValue(CONFIG.timezone)}.csv`, bookingCsvRows(retentionCandidates));
   const ids = retentionCandidates.map((item) => item.id);
   try {
@@ -770,7 +849,9 @@ async function exportOldRecords() {
     $("delete-old").disabled = false;
     setStatus("retention-status", `CSV gerado e registrado com ${ids.length} pedido(s). Confirme a exclusão somente depois de guardar o arquivo.`);
   } catch (error) {
-    setStatus("retention-status", error.message || "O CSV foi gerado, mas não foi possível registrar a exportação. A exclusão continua bloqueada.", true);
+    setStatus("retention-status", `${explainFirestoreError(error, "Não foi possível registrar a exportação.")} O arquivo pode ter sido baixado; a exclusão continua bloqueada.`, true);
+  } finally {
+    exportButton.disabled = false;
   }
 }
 
@@ -815,7 +896,7 @@ async function deleteExportedBatch() {
 async function toggleRetention() {
   const activating = !settings.retentionEnabled;
   const confirmation = activating
-    ? "Ativar a política de 60 dias? Ela só lista reservas recusadas, expiradas ou canceladas quando o painel é aberto. Cada lote exige CSV e confirmação antes da exclusão."
+    ? "Ativar a política de 60 dias? Ela lista reservas recusadas, expiradas, canceladas, finalizadas e faltas quando o painel é aberto. Cada lote exige CSV e confirmação antes da exclusão."
     : "Desativar a política de retenção? Nenhum lote será removido enquanto ela estiver desativada.";
   if (!window.confirm(confirmation)) return;
   try {
@@ -860,7 +941,11 @@ function showUser(user) {
   loginPanel.hidden = Boolean(user);
   dashboard.hidden = !user;
   if (!user) return;
-  $("admin-email").textContent = user.email || "Conta administrativa";
+  $("admin-email").textContent = `${user.email || "Conta autenticada"} · UID ${user.uid}`;
+  if (!CONFIG.authorizedAdminUids.includes(user.uid)) {
+    setDashboardAlert(`Esta conta não está autorizada no painel. UID conectado: ${user.uid}. Entre com a conta administrativa cadastrada no Firebase.`);
+    return;
+  }
   void loadAdminData();
 }
 
@@ -905,7 +990,7 @@ $("refresh-finance").addEventListener("click", loadFinance);
 $("export-finance").addEventListener("click", exportFinanceCsv);
 $("expense-form").elements.occurredOn.value = localDateInputValue(CONFIG.timezone);
 $("export-current").addEventListener("click", exportCurrentAgenda);
-$("print-current").addEventListener("click", () => window.print());
+$("print-current").addEventListener("click", printAgendaReport);
 $("retention-toggle").addEventListener("click", toggleRetention);
 $("export-old").addEventListener("click", exportOldRecords);
 $("delete-old").addEventListener("click", deleteExportedBatch);
