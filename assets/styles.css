@@ -139,6 +139,8 @@ input::placeholder, textarea::placeholder { color: #aaa19b; }
 .contact-details { display: grid; grid-template-columns: 1fr 1fr; gap: 30px 36px; padding-top: 20px; }
 .contact-actions { display: flex; flex-wrap: wrap; gap: 12px; grid-column: 1 / -1; margin-top: 2px; }
 .contact-actions .button { justify-content: center; }
+.contact-section { align-items: center; }
+.contact-actions { justify-content: flex-start; }
 .contact-details > div { padding-top: 12px; border-top: 1px solid var(--line); }
 .contact-details span { color: var(--rose-deep); font-size: 9px; font-weight: 700; letter-spacing: .16em; }
 .contact-details p, .contact-details a { margin: 6px 0 0; color: #625b55; font-size: 12px; text-decoration: none; }
@@ -207,6 +209,9 @@ input::placeholder, textarea::placeholder { color: #aaa19b; }
 .admin-service p { margin: 0 0 8px; color: var(--muted); font-size: 10px; }
 .admin-service .service-admin-meta { color: var(--ink); font-size: 10px; }
 .admin-service-actions { display: flex; flex-direction: column; gap: 5px; }
+.staff-form { display: grid; grid-template-columns: minmax(220px, 1fr) auto; align-items: end; gap: 10px; width: min(720px,100%); margin: 22px 0; padding: 22px; border: 1px solid var(--line); background: var(--paper); }
+.staff-form label { margin: 0; }
+.staff-form .form-status { grid-column: 1 / -1; margin: 0; }
 .app-dialog { width: min(560px, calc(100% - 26px)); max-height: 90vh; padding: 0; border: 1px solid var(--line); background: var(--paper); box-shadow: 0 20px 90px rgba(40,30,24,.25); }
 .app-dialog::backdrop { background: rgba(35,28,24,.45); }
 .app-dialog form { padding: 30px; overflow: auto; }
@@ -310,6 +315,8 @@ input::placeholder, textarea::placeholder { color: #aaa19b; }
   .contact-details { gap: 20px; padding-top: 5px; }
   .contact-actions { flex-direction: column; }
   .contact-actions .button { width: 100%; }
+  .staff-form { grid-template-columns: 1fr; }
+  .staff-form .form-status { grid-column: 1; }
   .site-footer { flex-wrap: wrap; justify-content: center; padding: 22px 18px; text-align: center; }
   .site-footer .brand { flex-basis: 100%; justify-content: center; }
   .site-footer p { flex-basis: 100%; }
@@ -350,5 +357,4 @@ input::placeholder, textarea::placeholder { color: #aaa19b; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; }
 }
-
 
