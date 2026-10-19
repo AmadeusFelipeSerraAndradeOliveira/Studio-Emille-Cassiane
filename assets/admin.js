@@ -485,6 +485,28 @@ async function ensureInitialStaff() {
   });
 }
 
+async function ensureInitialServices() {
+  const current = await sdk.getDocs(sdk.collection(db, "services"));
+  if (!current.empty) return;
+  const initial = [
+    ["atendimento-social", { name: "Atendimento Social", description: "Valor e duração iniciais de referência. Edite as informações no painel conforme necessário.", durationMinutes: 60, basePriceCents: 12000 }],
+    ["noiva-civil", { name: "Noiva Civil", description: "Valor e duração iniciais de referência. Edite as informações no painel conforme necessário.", durationMinutes: 90, basePriceCents: 25000 }],
+    ["dia-da-noiva", { name: "Dia da Noiva", description: "Valor e duração iniciais de referência. Edite as informações no painel conforme necessário.", durationMinutes: 120, basePriceCents: 60000 }],
+    ["curso-auto-maquiagem", { name: "Curso Auto Maquiagem", description: "Valor e duração iniciais de referência. Edite as informações no painel conforme necessário.", durationMinutes: 120, basePriceCents: 20000 }],
+  ];
+  const batch = sdk.writeBatch(db);
+  initial.forEach(([id, service]) => batch.set(sdk.doc(db, "services", id), {
+    ...service,
+    promoPriceCents: null,
+    promoStartsAt: null,
+    promoEndsAt: null,
+    active: true,
+    createdAt: sdk.serverTimestamp(),
+    updatedAt: sdk.serverTimestamp(),
+  }));
+  await batch.commit();
+}
+
 async function loadStaff() {
   if (!currentUser) return;
   const container = $("admin-staff-list");
@@ -1016,6 +1038,7 @@ async function loadAdminData() {
       maintenanceSnapshot.exists() ? maintenanceSnapshot.data() : {},
     );
     await ensureInitialStaff();
+    await ensureInitialServices();
     await loadStaff();
     try {
       await expirePendingBookings();
